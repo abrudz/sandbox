@@ -1,6 +1,9 @@
 package config_test
 
 import (
+	"net/netip"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +23,74 @@ func TestDefaultsApplyWhenNoVariableIsSet(t *testing.T) {
 	}
 
 	want := config.Limits{
-		Timeout:     10 * time.Second,
-		OutputLimit: 128 * 1024,
-		Memory:      512 << 20,
-		CPUs:        1,
-		Pids:        64,
+		Timeout:           10 * time.Second,
+		OutputLimit:       128 * 1024,
+		Memory:            512 << 20,
+		CPUs:              1,
+		Pids:              64,
+		RequestLimit:      64 * 1024,
+		Concurrency:       runtime.NumCPU(),
+		ClientConcurrency: 2,
+		ClientRate:        30,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("limits %+v, want %+v", got, want)
+	}
+}
+
+func TestSandboxRequestLimitSetsTheLargestRequest(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_REQUEST_LIMIT": "1024"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.RequestLimit != 1024 {
+		t.Fatalf("request limit %d, want 1024", got.RequestLimit)
+	}
+}
+
+func TestSandboxConcurrencySetsTheNumberOfSlots(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_CONCURRENCY": "3"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Concurrency != 3 {
+		t.Fatalf("concurrency %d, want 3", got.Concurrency)
+	}
+}
+
+func TestSandboxClientConcurrencySetsThePerClientLimit(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_CLIENT_CONCURRENCY": "1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.ClientConcurrency != 1 {
+		t.Fatalf("client concurrency %d, want 1", got.ClientConcurrency)
+	}
+}
+
+func TestSandboxClientRateSetsThePerMinuteLimit(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_CLIENT_RATE": "10"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.ClientRate != 10 {
+		t.Fatalf("client rate %d, want 10", got.ClientRate)
+	}
+}
+
+func TestSandboxTrustedProxiesListsAddressesAndNetworks(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_TRUSTED_PROXIES": "172.18.0.0/16, 10.1.2.3"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("10.1.2.3/32")}
+	if !reflect.DeepEqual(got.TrustedProxies, want) {
+		t.Fatalf("trusted proxies %v, want %v", got.TrustedProxies, want)
 	}
 }
 
@@ -124,6 +187,16 @@ func TestInvalidLimitsAreRejectedNamingTheVariable(t *testing.T) {
 		{"SANDBOX_PIDS", "many"},
 		{"SANDBOX_PIDS", "0"},
 		{"SANDBOX_PIDS", "-3"},
+		{"SANDBOX_REQUEST_LIMIT", "big"},
+		{"SANDBOX_REQUEST_LIMIT", "0"},
+		{"SANDBOX_CONCURRENCY", "lots"},
+		{"SANDBOX_CONCURRENCY", "0"},
+		{"SANDBOX_CLIENT_CONCURRENCY", "-1"},
+		{"SANDBOX_CLIENT_CONCURRENCY", "0"},
+		{"SANDBOX_CLIENT_RATE", "often"},
+		{"SANDBOX_CLIENT_RATE", "0"},
+		{"SANDBOX_TRUSTED_PROXIES", "not-an-address"},
+		{"SANDBOX_TRUSTED_PROXIES", "10.0.0.0/33"},
 	} {
 		_, err := config.FromEnv(environment(map[string]string{tc.name: tc.value}))
 		if err == nil || !strings.Contains(err.Error(), tc.name) {

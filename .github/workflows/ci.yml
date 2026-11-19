@@ -68,8 +68,12 @@ jobs:
         run: docker build --progress=plain -t "$SANDBOX_IMAGE" -f image/Containerfile .
 
       - name: Start container
+        # Every test run comes from this one client, so the per-minute limit
+        # is raised for the shared container; tests of the limit start
+        # containers of their own.
         run: |
-          docker run -d --privileged --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 "$SANDBOX_IMAGE"
+          docker run -d --privileged --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
+            -e SANDBOX_CLIENT_RATE=100000 "$SANDBOX_IMAGE"
           for _ in $(seq 30); do
             if curl -s -o /dev/null "$SANDBOX_URL/"; then
               exit 0

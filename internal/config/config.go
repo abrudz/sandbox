@@ -1,14 +1,17 @@
-// Package config reads runner-api's per-run limits from the environment.
+// Package config reads runner-api's limits from the environment.
 package config
 
 import (
 	"fmt"
 	"math"
+	"net/netip"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// Limits are the per-run limits runner-api enforces.
+// Limits are the limits runner-api enforces, per run and per request.
 type Limits struct {
 	// Timeout is the wall-clock limit of one run (SANDBOX_TIMEOUT, a Go
 	// duration such as "10s").
@@ -25,6 +28,22 @@ type Limits struct {
 	// Pids is the number of processes and threads one run may have
 	// (SANDBOX_PIDS).
 	Pids int
+	// RequestLimit is the largest code plus input one request may carry, in
+	// bytes (SANDBOX_REQUEST_LIMIT).
+	RequestLimit int
+	// Concurrency is the number of runs in progress at once across all
+	// clients (SANDBOX_CONCURRENCY).
+	Concurrency int
+	// ClientConcurrency is the number of runs one client may have in
+	// progress at once (SANDBOX_CLIENT_CONCURRENCY).
+	ClientConcurrency int
+	// ClientRate is the number of runs one client may start per minute
+	// (SANDBOX_CLIENT_RATE).
+	ClientRate int
+	// TrustedProxies are the peers whose X-Forwarded-For header identifies
+	// the client (SANDBOX_TRUSTED_PROXIES: comma-separated addresses or
+	// networks). Without them, the peer address is the client.
+	TrustedProxies []netip.Prefix
 }
 
 // Workspace is the interpreter's maximum workspace (MAXWS) in bytes: half
@@ -34,24 +53,58 @@ func (l Limits) Workspace() int64 {
 	return l.Memory / 2
 }
 
-// The plan's defaults (Sandbox limits table).
+// The plan's defaults (Sandbox limits table); the default concurrency is
+// the number of CPUs.
 const (
-	defaultTimeout     = 10 * time.Second
-	defaultOutputLimit = 128 * 1024
-	defaultMemory      = 512 << 20
-	defaultCPUs        = 1
-	defaultPids        = 64
+	defaultTimeout           = 10 * time.Second
+	defaultOutputLimit       = 128 * 1024
+	defaultMemory            = 512 << 20
+	defaultCPUs              = 1
+	defaultPids              = 64
+	defaultRequestLimit      = 64 * 1024
+	defaultClientConcurrency = 2
+	defaultClientRate        = 30
 )
 
 // FromEnv reads the limits, applying defaults for unset variables. getenv
 // is os.Getenv outside tests.
 func FromEnv(getenv func(string) string) (Limits, error) {
 	limits := Limits{
-		Timeout:     defaultTimeout,
-		OutputLimit: defaultOutputLimit,
-		Memory:      defaultMemory,
-		CPUs:        defaultCPUs,
-		Pids:        defaultPids,
+		Timeout:           defaultTimeout,
+		OutputLimit:       defaultOutputLimit,
+		Memory:            defaultMemory,
+		CPUs:              defaultCPUs,
+		Pids:              defaultPids,
+		RequestLimit:      defaultRequestLimit,
+		Concurrency:       runtime.NumCPU(),
+		ClientConcurrency: defaultClientConcurrency,
+		ClientRate:        defaultClientRate,
+	}
+
+	for _, v := range []struct {
+		name, want string
+		dst        *int
+	}{
+		{"SANDBOX_REQUEST_LIMIT", "a positive number of bytes", &limits.RequestLimit},
+		{"SANDBOX_CONCURRENCY", "a positive number of runs", &limits.Concurrency},
+		{"SANDBOX_CLIENT_CONCURRENCY", "a positive number of runs", &limits.ClientConcurrency},
+		{"SANDBOX_CLIENT_RATE", "a positive number of runs per minute", &limits.ClientRate},
+	} {
+		if s := getenv(v.name); s != "" {
+			n, err := strconv.Atoi(s)
+			if err != nil || n <= 0 {
+				return Limits{}, fmt.Errorf("%s=%q: want %s", v.name, s, v.want)
+			}
+			*v.dst = n
+		}
+	}
+
+	if s := getenv("SANDBOX_TRUSTED_PROXIES"); s != "" {
+		proxies, err := parsePrefixes(s)
+		if err != nil {
+			return Limits{}, fmt.Errorf("SANDBOX_TRUSTED_PROXIES=%q: %v", s, err)
+		}
+		limits.TrustedProxies = proxies
 	}
 
 	if v := getenv("SANDBOX_TIMEOUT"); v != "" {
@@ -95,6 +148,32 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 	}
 
 	return limits, nil
+}
+
+// parsePrefixes reads comma-separated addresses and networks; an address
+// stands for itself alone.
+func parsePrefixes(s string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for item := range strings.SplitSeq(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			p, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, fmt.Errorf("want addresses or networks such as 172.18.0.0/16: %v", err)
+			}
+			prefixes = append(prefixes, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("want addresses or networks such as 172.18.0.0/16: %v", err)
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+	}
+	return prefixes, nil
 }
 
 // parseSize reads a number of bytes, optionally followed by K, M or G
