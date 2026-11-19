@@ -42,6 +42,10 @@ func main() {
 		JobsDir:     jobsDir,
 		Timeout:     limits.Timeout,
 		OutputLimit: limits.OutputLimit,
+		Memory:      limits.Memory,
+		CPUs:        limits.CPUs,
+		Pids:        limits.Pids,
+		Workspace:   limits.Workspace(),
 		Logf:        log.Printf,
 	}
 	srv := &http.Server{
@@ -52,7 +56,9 @@ func main() {
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("runner-api listening on %s (Dyalog %s; timeout %v, output limit %d bytes per stream)",
-		srv.Addr, strings.TrimSpace(string(version)), limits.Timeout, limits.OutputLimit)
+	log.Printf("runner-api listening on %s (Dyalog %s; per run: timeout %v, output %d bytes per stream, "+
+		"memory %d bytes, workspace %d bytes, %g CPUs, %d processes)",
+		srv.Addr, strings.TrimSpace(string(version)), limits.Timeout, limits.OutputLimit,
+		limits.Memory, limits.Workspace(), limits.CPUs, limits.Pids)
 	log.Fatal(srv.ListenAndServe())
 }

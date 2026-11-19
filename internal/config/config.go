@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 )
@@ -26,21 +27,32 @@ type Limits struct {
 	Pids int
 }
 
-// Workspace is the interpreter's maximum workspace (MAXWS) in bytes.
+// Workspace is the interpreter's maximum workspace (MAXWS) in bytes: half
+// the memory limit, so the interpreter reports WS FULL before the cgroup's
+// memory limit is reached, whatever that limit is.
 func (l Limits) Workspace() int64 {
-	return 0
+	return l.Memory / 2
 }
 
 // The plan's defaults (Sandbox limits table).
 const (
 	defaultTimeout     = 10 * time.Second
 	defaultOutputLimit = 128 * 1024
+	defaultMemory      = 512 << 20
+	defaultCPUs        = 1
+	defaultPids        = 64
 )
 
 // FromEnv reads the limits, applying defaults for unset variables. getenv
 // is os.Getenv outside tests.
 func FromEnv(getenv func(string) string) (Limits, error) {
-	limits := Limits{Timeout: defaultTimeout, OutputLimit: defaultOutputLimit}
+	limits := Limits{
+		Timeout:     defaultTimeout,
+		OutputLimit: defaultOutputLimit,
+		Memory:      defaultMemory,
+		CPUs:        defaultCPUs,
+		Pids:        defaultPids,
+	}
 
 	if v := getenv("SANDBOX_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)
@@ -58,5 +70,55 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 		limits.OutputLimit = n
 	}
 
+	if v := getenv("SANDBOX_MEMORY"); v != "" {
+		n, err := parseSize(v)
+		if err != nil || n <= 0 {
+			return Limits{}, fmt.Errorf("SANDBOX_MEMORY=%q: want a positive size such as 512M", v)
+		}
+		limits.Memory = n
+	}
+
+	if v := getenv("SANDBOX_CPUS"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || !(f > 0) || math.IsInf(f, 1) {
+			return Limits{}, fmt.Errorf("SANDBOX_CPUS=%q: want a positive number such as 1 or 0.5", v)
+		}
+		limits.CPUs = f
+	}
+
+	if v := getenv("SANDBOX_PIDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Limits{}, fmt.Errorf("SANDBOX_PIDS=%q: want a positive number of processes", v)
+		}
+		limits.Pids = n
+	}
+
 	return limits, nil
+}
+
+// parseSize reads a number of bytes, optionally followed by K, M or G
+// (powers of 1024, either case).
+func parseSize(s string) (int64, error) {
+	unit := int64(1)
+	switch s[len(s)-1] {
+	case 'k', 'K':
+		unit = 1 << 10
+	case 'm', 'M':
+		unit = 1 << 20
+	case 'g', 'G':
+		unit = 1 << 30
+	}
+	digits := s
+	if unit > 1 {
+		digits = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n > math.MaxInt64/unit {
+		return 0, fmt.Errorf("size %q is too large", s)
+	}
+	return n * unit, nil
 }

@@ -25,6 +25,14 @@ type Nsjail struct {
 	Timeout time.Duration
 	// OutputLimit is the number of bytes kept from each of stdout and stderr.
 	OutputLimit int
+	// Memory is the run's cgroup memory limit in bytes; swap is disabled.
+	Memory int64
+	// CPUs is the CPU time the run may use per second of wall-clock time.
+	CPUs float64
+	// Pids is the run's cgroup limit on processes and threads.
+	Pids int
+	// Workspace is the interpreter's MAXWS in bytes.
+	Workspace int64
 	// Logf receives nsjail's log when nsjail cannot run a job.
 	Logf func(format string, args ...any)
 }
@@ -76,6 +84,13 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 		// nsjail counts whole seconds, so its own limit is only a backstop
 		// that never fires before the timer above.
 		"--time_limit", strconv.Itoa(int(math.Ceil(n.Timeout.Seconds())) + 2),
+		// The run's own cgroup; nsjail creates and removes it.
+		"--cgroup_mem_max", strconv.FormatInt(n.Memory, 10),
+		"--cgroup_mem_swap_max", "0",
+		"--cgroup_pids_max", strconv.Itoa(n.Pids),
+		"--cgroup_cpu_ms_per_sec", strconv.Itoa(max(1, int(math.Round(n.CPUs*1000)))),
+		// Dyalog reads a size without a unit as KiB; the unit is explicit.
+		"--env", fmt.Sprintf("MAXWS=%dK", n.Workspace/1024),
 		"--", n.Command,
 	}
 	cmd := exec.CommandContext(runCtx, n.Binary, append(args, job.Args...)...)
