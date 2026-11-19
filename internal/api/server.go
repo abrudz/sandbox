@@ -40,6 +40,11 @@ type Options struct {
 	Now func() time.Time
 	// WebDir holds the frontend's files, served at /; empty serves none.
 	WebDir string
+	// ImageDigest is the digest of the docker.io/dyalog/dyalog image the
+	// sandbox image was built from.
+	ImageDigest string
+	// Commit is the commit of this repository the image was built from.
+	Commit string
 }
 
 // Server is the runner's HTTP handler.

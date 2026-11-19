@@ -123,6 +123,25 @@ func TestPostRunAnswers503WhenTheSandboxCannotRunTheJob(t *testing.T) {
 	}
 }
 
+func TestGetVersionReportsTheUpstreamDigestAndCommit(t *testing.T) {
+	const (
+		digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		commit = "0123456789abcdef0123456789abcdef01234567"
+	)
+	h := api.NewHandler(api.Options{Executor: &fakeExecutor{}, DyalogVersion: version, ImageDigest: digest, Commit: commit})
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+
+	got := decode(t, rec)
+	if got["imageDigest"] != digest {
+		t.Errorf("imageDigest %v, want %q", got["imageDigest"], digest)
+	}
+	if got["commit"] != commit {
+		t.Errorf("commit %v, want %q", got["commit"], commit)
+	}
+}
+
 func TestGetVersionReportsTheDyalogVersion(t *testing.T) {
 	h := api.NewHandler(api.Options{Executor: &fakeExecutor{}, DyalogVersion: version})
 	rec := httptest.NewRecorder()
