@@ -91,7 +91,10 @@ test("each permalink format is generated, and reopening the permalink restores e
   await expect(reopened.locator("#code")).toHaveValue("⎕←h+⍳3");
   await expect(reopened.locator("#footer")).toHaveValue("⍝ end");
   await expect(reopened.locator("#input")).toHaveValue("line 1\nline 2");
-  await expect(reopened.locator("#cla-wrapper textarea")).toHaveValues(["first arg", "second arg"]);
+  const args = reopened.locator("#cla-wrapper textarea");
+  await expect(args).toHaveCount(2);
+  await expect(args.nth(0)).toHaveValue("first arg");
+  await expect(args.nth(1)).toHaveValue("second arg");
 });
 
 test("a tio.run permalink for apl-dyalog opens with the same fields when its host is replaced", async ({ page }) => {
