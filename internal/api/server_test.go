@@ -10,7 +10,7 @@ import (
 
 func TestGetHealthzReturnsOK(t *testing.T) {
 	rec := httptest.NewRecorder()
-	api.NewHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	api.NewHandler(api.Options{Executor: &fakeExecutor{}}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz: status %d, want %d", rec.Code, http.StatusOK)

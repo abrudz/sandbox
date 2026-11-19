@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# Entry point of every jailed run. /job/code holds the program, standard
+# input carries its input, and the arguments are passed on to the program.
+
+set -euo pipefail
+
+script="$HOME/main.apls"
+cp /job/code "$script"
+# dyalogscript ignores a last line that has no terminating newline.
+if [[ -s $script && -n $(tail -c 1 "$script") ]]; then
+  echo >> "$script"
+fi
+
+exec dyalogscript "$script" "$@"

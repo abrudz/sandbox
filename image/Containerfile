@@ -43,7 +43,14 @@ RUN apt-get update \
 COPY --from=nsjail /out/nsjail /usr/local/bin/nsjail
 RUN ! ldd /usr/local/bin/nsjail | grep 'not found'
 COPY --from=runner-api /out/runner-api /usr/local/bin/runner-api
-COPY image/entrypoint /usr/local/bin/entrypoint
+COPY image/entrypoint image/run /usr/local/bin/
+COPY image/nsjail.cfg /etc/sandbox/nsjail.cfg
+# runner-api reports this version; it is the interpreter's own answer.
+RUN mkdir -p /usr/share/sandbox \
+ && printf '%s\n' "⎕←2⊃'.'⎕WG'APLVersion'" > /tmp/version.apls \
+ && dyalogscript /tmp/version.apls | tr -d '\r\n' > /usr/share/sandbox/dyalog-version \
+ && rm /tmp/version.apls \
+ && grep -Eqx '[0-9]+(\.[0-9]+)+' /usr/share/sandbox/dyalog-version
 # Dyalog's licence stays at /LICENSE, where the base image puts it.
 COPY THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 COPY LICENSE /usr/share/doc/sandbox/LICENSE
