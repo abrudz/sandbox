@@ -51,10 +51,12 @@ jobs:
         run: go test -count=1 ./...
 
       - uses: actions/setup-node@v4
+        if: ${{ !cancelled() }}
         with:
           node-version: 20
 
       - name: Frontend scripts
+        if: ${{ !cancelled() }}
         run: |
           for f in web/*.js; do node --check "$f"; done
           node --test test/ui/codec.test.js
