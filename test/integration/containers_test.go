@@ -68,7 +68,8 @@ for d in /proc/[0-9]*; do
   [ "$pid" = "$self" ] && continue
   ppid=$(awk '/^PPid:/ { print $2 }' "$d/status" 2>/dev/null)
   [ -z "$ppid" ] || [ "$ppid" = "$self" ] && continue
-  echo "process $pid $(cat "$d/comm" 2>/dev/null)"
+  state=$(awk '/^State:/ { print $2 }' "$d/status" 2>/dev/null)
+  echo "process $pid state $state $(cat "$d/comm" 2>/dev/null)"
 done
 for j in /tmp/sandbox-jobs/*; do
   [ -e "$j" ] && echo "job directory $j"
@@ -76,7 +77,8 @@ done
 find /sys/fs/cgroup -mindepth 1 -type d ! -path /sys/fs/cgroup/init | sed 's/^/cgroup /'
 `
 
-// leftovers returns one line per thing left behind in container.
+// leftovers returns one line per thing left behind in container. Processes
+// read "process <pid> state <state> <name>", so a zombie shows state Z.
 func leftovers(t *testing.T, container string) []string {
 	t.Helper()
 	out, err := docker(t, "exec", container, "sh", "-c", leftoverScript)

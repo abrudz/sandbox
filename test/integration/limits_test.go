@@ -64,8 +64,11 @@ func TestStderrPastTheCapIsTruncatedAndFlagged(t *testing.T) {
 	assertExitCode(t, r, 0)
 }
 
+// Tests that inspect leftovers use a container of their own, so nothing an
+// earlier test left behind can affect them.
+
 func TestClosingTheConnectionKillsTheRunWithinOneSecond(t *testing.T) {
-	url, container := env(t, "SANDBOX_URL"), env(t, "SANDBOX_CONTAINER")
+	url, container := startContainer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -106,14 +109,16 @@ func TestClosingTheConnectionKillsTheRunWithinOneSecond(t *testing.T) {
 	}
 }
 
+// isInterpreter reports whether leftover is a running dyalog process.
 func isInterpreter(leftover string) bool {
-	return strings.HasPrefix(leftover, "process ") && strings.HasSuffix(leftover, " dyalog")
+	f := strings.Fields(leftover)
+	return len(f) == 5 && f[0] == "process" && f[3] != "Z" && f[4] == "dyalog"
 }
 
 func TestNothingRemainsAfterACompletedRun(t *testing.T) {
-	container := env(t, "SANDBOX_CONTAINER")
+	url, container := startContainer(t)
 
-	run(t, "⎕←'done'\n", "")
+	runAt(t, url, "⎕←'done'\n", "")
 
 	if left := leftovers(t, container); len(left) > 0 {
 		t.Errorf("a completed run left %q", left)
