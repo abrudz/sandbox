@@ -58,8 +58,8 @@ func startContainer(t *testing.T, vars ...string) (url, name string) {
 }
 
 // leftoverScript lists what runs have left in a container: processes other
-// than runner-api (PID 1) and this script and its children, per-run
-// directories, and cgroups other than the entry point's leaf "init".
+// than the container's PID 1, runner-api, and this script and its children;
+// per-run directories; and cgroups other than the entry point's leaf "init".
 const leftoverScript = `
 self=$$
 for d in /proc/[0-9]*; do
@@ -68,8 +68,10 @@ for d in /proc/[0-9]*; do
   [ "$pid" = "$self" ] && continue
   ppid=$(awk '/^PPid:/ { print $2 }' "$d/status" 2>/dev/null)
   [ -z "$ppid" ] || [ "$ppid" = "$self" ] && continue
+  name=$(cat "$d/comm" 2>/dev/null)
+  [ "$name" = runner-api ] && continue
   state=$(awk '/^State:/ { print $2 }' "$d/status" 2>/dev/null)
-  echo "process $pid state $state $(cat "$d/comm" 2>/dev/null)"
+  echo "process $pid state $state $name"
 done
 for j in /tmp/sandbox-jobs/*; do
   [ -e "$j" ] && echo "job directory $j"
