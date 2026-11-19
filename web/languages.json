@@ -1,6 +1,6 @@
 {
 	"apl-dyalog": {
-		"name": "APL (Dyalog Unicode)",
+		"name": "Dyalog APL",
 		"link": "https://www.dyalog.com/",
 		"encoding": "UTF-8",
 		"prettify": "apl",

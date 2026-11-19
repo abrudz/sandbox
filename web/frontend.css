@@ -21,18 +21,14 @@
 		url(/Exo2-SemiBold.woff) format('woff');
 }
 
-/* DejaVu Sans Mono under a name of its own: lb.js declares a
-   'DejaVu Sans Mono' face whose only fallback is a file it does not ship,
-   and that declaration would replace this one. */
 @font-face {
 	font-display: swap;
-	font-family: 'Sandbox Mono';
+	font-family: 'APL387';
 	font-style: normal;
 	font-weight: 400;
 	src:
-		local('DejaVu Sans Mono'),
-		url(/DejaVuSansMono.woff2) format('woff2'),
-		url(/DejaVuSansMono.woff) format('woff');
+		url(/APL387.woff2) format('woff2'),
+		url(/APL387.woff) format('woff');
 }
 
 a, a * {
@@ -145,14 +141,6 @@ nav > *:hover:active, .copy-button:hover:active {
 
 nav > *:not(:last-child) {
 	margin-right: 4%;
-}
-
-/* The site name needs its full width, which the 22% limit for TIO's logo
-   would clip on a phone; the three buttons still fit at 320px. */
-#site {
-	font-size: 20px;
-	font-weight: 600;
-	max-width: none;
 }
 
 body {
@@ -306,7 +294,7 @@ textarea {
 	background: #202020;
 	box-sizing: border-box;
 	color: #C0C0C0;
-	font-family: 'Sandbox Mono', monospace;
+	font-family: 'APL387', monospace;
 	font-size: 16px;
 	outline: none;
 	overflow: hidden;
@@ -421,10 +409,11 @@ body.command-mode textarea {
 	text-shadow: 0 0 0 #C0C0C0;
 }
 
-/* lb.js's language bar sits under the navigation bar (frontend.js sets its
-   top and #main's), in the page's colours. lb.js styles it after this
-   stylesheet loads, so these rules need the higher specificity, and the
-   body margin it sets is not used by the fixed layout. */
+/* lb.js's language bar sits at the top of the window, above the navigation
+   bar (frontend.js sets the navigation bar's top and #main's), in the
+   page's colours. lb.js styles it after this stylesheet loads, so these
+   rules need the higher specificity, and the body margin it sets is not
+   used by the fixed layout. */
 body {
 	margin-top: 0 !important;
 }
@@ -433,17 +422,12 @@ body .ngn_lb {
 	background-color: #303030;
 	border-bottom: solid #202020 1px;
 	color: #C0C0C0;
-	font-family: 'Sandbox Mono', monospace;
+	font-family: 'APL387', monospace;
 	font-size: 16px;
-	top: 48px;
 	z-index: 1;
 }
 
 body .ngn_lb b:hover, body.ngn_bq .ngn_lb {
 	background-color: #202020;
 	color: #F0F0F0;
-}
-
-body .ngn_x {
-	color: #808080;
 }

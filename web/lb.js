@@ -1,3 +1,5 @@
+// abrudz/lb at 342eec94a23c7eaff5e179ceaff5df2938805c73, without the close
+// button: the bar is part of the page's fixed layout.
 ; (_ => {
 	let hc = { '<': '&lt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }, he = x => x.replace(/[<&'"]/g, c => hc[c]) //html chars and escape fn
 		, tcs = '<-←xx×/\\×:-÷*O⍟○*⍟[-⌹-]⌹⎕÷⌹[÷⌹]÷⌹OO○77⌈FF⌈ll⌊LL⌊T_⌶II⌶⊥⊤⌶|_⊥TT⊤-|⊣|-⊢=/≠L-≠<=≤<_≤>=≥>_≥==≡=_≡7=≢Z-≢≠_≢vv∨^^∧^~⍲∧~⍲v~⍱∨~⍱^|↑v|↓((⊂cc⊂(_⊆c_⊆⊂_⊆))⊃[|⌷|]⌷A|⍋∆|⍋V|⍒∇|⍒ii⍳i_⍸⍳_⍸ee∊e_⍷∊_⍷' +
@@ -28,22 +30,19 @@
 		lbh += '<b title="' + he(lbs[i].slice(1) + (ks.length ? '\n' + ks.join('') : '')) + '">' + lbs[i][0] + '</b>'
 	}
 	let d = document, el = d.createElement('div'); el.innerHTML =
-		`<div class=ngn_lb><span class=ngn_x title=Close>❎</span>${lbh}</div>
+		`<div class=ngn_lb>${lbh}</div>
  <style>@font-face{font-family:"DejaVu Sans Mono";src:local("DejaVu Sans Mono"),url(DejaVuBQNSansMono.ttf)format('ttf');}</style>
  <style>
   .ngn_lb{position:fixed;top:0;left:0;right:0;background-color:#eee;color:#000;cursor:default;z-index:2147483647;
     font-family:"DejaVu Sans Mono",monospace;border-bottom:solid #999 1px;padding:2px 2px 0 2px;word-wrap:break-word;}
   .ngn_lb b{cursor:pointer;padding:0 1px;font-weight:normal}
   .ngn_lb b:hover,.ngn_bq .ngn_lb{background-color:#777;color:#fff}
-  .ngn_x{float:right;color:#999;cursor:pointer;margin-top:-3px}
-  .ngn_x:hover{color:#f00}
  </style>`
 	d.body.appendChild(el)
 	let t, ts = [], lb = el.firstChild, bqm = 0 //t:textarea or input, lb:language bar, bqm:backquote mode
 	let pd = x => x.preventDefault()
 	let ev = (x, t, f, c) => x.addEventListener(t, f, c)
 	ev(lb, 'mousedown', x => {
-		if (x.target.classList.contains('ngn_x')) { lb.hidden = 1; upd(); pd(x); return }
 		if (x.target.nodeName === 'B' && t) {
 			let i = t.selectionStart, j = t.selectionEnd, v = t.value, s = x.target.textContent
 			if (i != null && j != null) { t.value = v.slice(0, i) + s + v.slice(j); t.selectionStart = t.selectionEnd = i + 1 }

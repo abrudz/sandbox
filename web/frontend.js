@@ -2,7 +2,6 @@
 // MIT) reduced to apl-dyalog and talking JSON to /api/v1/run. Permalink and
 // output helpers are in codec.js; lb.js provides the APL language bar.
 
-var baseTitle = document.title;
 var bodyWidth = document.body.clientWidth;
 var defaultLanguage = "apl-dyalog";
 var languageId;
@@ -271,7 +270,6 @@ function testToState(test) {
 }
 
 function init() {
-	document.title = baseTitle;
 	$("#toggle-permalink").checked = false;
 	$("nav").classList.remove("hidden");
 	var hash = unescape(location.hash.slice(1));
@@ -288,7 +286,6 @@ function init() {
 		return;
 	}
 	$("#toggle-interpreter").checked = true;
-	document.title = language.name + " | " + baseTitle;
 	$("#lang-link").href = language.link;
 	$("#lang-name").textContent = language.name;
 	postStateFill();
@@ -331,16 +328,15 @@ function saveState(saveIfEmpty) {
 		history.pushState({}, "", fieldsToPermalink(fields));
 }
 
-// layoutLanguageBar places lb.js's language bar under the navigation bar
-// and the page under both. lb.js puts its bar at the top of the window and
-// sets a top margin on the body, which TIO's fixed layout does not use.
+// layoutLanguageBar places the navigation bar under lb.js's language bar,
+// which is fixed at the top of the window, and the page under both. lb.js
+// also sets a top margin on the body, which TIO's fixed layout does not use.
 // lb.js loads before this script, so the bar exists when boot runs.
 function layoutLanguageBar() {
 	var bar = $(".ngn_lb");
-	var height = bar && !bar.hidden ? bar.offsetHeight : 0;
-	if (bar)
-		bar.style.top = navHeight + "px";
-	$("#main").style.top = navHeight + height + "px";
+	var height = bar ? bar.offsetHeight : 0;
+	$("nav").style.top = height + "px";
+	$("#main").style.top = height + navHeight + "px";
 }
 
 // refreshActiveField updates the byte count and size of the focused field
@@ -524,8 +520,7 @@ function boot() {
 		}
 	});
 
-	// The bar's height changes as its font loads, as the window narrows and
-	// when it is closed.
+	// The bar's height changes as its font loads and as the window narrows.
 	var bar = $(".ngn_lb");
 	if (bar && window.ResizeObserver)
 		new ResizeObserver(layoutLanguageBar).observe(bar);
