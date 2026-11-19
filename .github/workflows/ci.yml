@@ -107,9 +107,12 @@ jobs:
       - name: UI tests
         if: ${{ !cancelled() }}
         working-directory: test/ui
+        # The runner image carries Chrome's shared libraries, so only the
+        # browser is downloaded; nothing comes from the Ubuntu archive.
+        timeout-minutes: 15
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
           npx playwright test
 
       - name: Container logs
