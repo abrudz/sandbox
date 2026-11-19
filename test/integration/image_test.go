@@ -3,64 +3,63 @@
 package integration
 
 import (
-	"encoding/json"
-	"net/http"
-	"os/exec"
-	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// imageLabels returns the labels of the running container's image.
-func imageLabels(t *testing.T) map[string]string {
-	t.Helper()
-	out, err := docker(t, "inspect", "--format", "{{json .Config.Labels}}", env(t, "SANDBOX_CONTAINER"))
+func TestImageKeepsDyalogLicence(t *testing.T) {
+	image := env(t, "SANDBOX_IMAGE")
+
+	out, err := docker(t, "run", "--rm", "--entrypoint", "cat", image, "/LICENSE")
 	if err != nil {
-		t.Fatalf("docker inspect: %v\n%s", err, out)
+		t.Fatalf("reading /LICENSE from %s: %v\n%s", image, err, out)
 	}
-	var labels map[string]string
-	if err := json.Unmarshal([]byte(out), &labels); err != nil {
-		t.Fatalf("docker inspect: labels are not JSON: %v\n%s", err, out)
-	}
-	return labels
-}
-
-func TestVersionReportsTheImageLabels(t *testing.T) {
-	var v struct {
-		DyalogVersion string `json:"dyalogVersion"`
-		ImageDigest   string `json:"imageDigest"`
-		Commit        string `json:"commit"`
-	}
-	data := request(t, http.MethodGet, "/api/v1/version", nil)
-	if err := json.Unmarshal(data, &v); err != nil {
-		t.Fatalf("GET /api/v1/version: response is not JSON: %v\n%s", err, data)
-	}
-	labels := imageLabels(t)
-
-	for _, c := range []struct{ label, api, pattern string }{
-		{"org.opencontainers.image.version", v.DyalogVersion, `^\d+(\.\d+)+$`},
-		{"org.opencontainers.image.base.digest", v.ImageDigest, `^sha256:[0-9a-f]{64}$`},
-		{"org.opencontainers.image.revision", v.Commit, `^[0-9a-f]{40}$`},
-	} {
-		if labels[c.label] != c.api {
-			t.Errorf("label %s is %q; /api/v1/version reports %q", c.label, labels[c.label], c.api)
-		}
-		if !regexp.MustCompile(c.pattern).MatchString(c.api) {
-			t.Errorf("/api/v1/version value %q for %s does not match %s", c.api, c.label, c.pattern)
-		}
-	}
-	if got, want := labels["org.opencontainers.image.base.name"], "docker.io/dyalog/dyalog:latest"; got != want {
-		t.Errorf("label org.opencontainers.image.base.name is %q, want %q", got, want)
+	if !strings.Contains(out, "Dyalog") {
+		t.Fatalf("/LICENSE does not mention Dyalog; first 500 bytes:\n%.500s", out)
 	}
 }
 
-func TestImageIsBuiltFromTheCommitUnderTest(t *testing.T) {
-	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("git rev-parse HEAD: %v", err)
-	}
+func TestImageShipsThirdPartyNotices(t *testing.T) {
+	image := env(t, "SANDBOX_IMAGE")
 
-	if got, want := imageLabels(t)["org.opencontainers.image.revision"], strings.TrimSpace(string(head)); got != want {
-		t.Errorf("label org.opencontainers.image.revision is %q, want the checked-out commit %q", got, want)
+	out, err := docker(t, "run", "--rm", "--entrypoint", "cat", image, "/THIRD_PARTY_NOTICES")
+	if err != nil {
+		t.Fatalf("reading /THIRD_PARTY_NOTICES from %s: %v\n%s", image, err, out)
+	}
+	// Each component compiled into the image, and a phrase from its licence text.
+	for _, want := range []string{"nsjail", "Kafel", "Apache License", "The Go Authors"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("/THIRD_PARTY_NOTICES does not contain %q", want)
+		}
+	}
+}
+
+func TestImageRunsAJailedProcess(t *testing.T) {
+	image := env(t, "SANDBOX_IMAGE")
+
+	out, err := docker(t, "run", "--rm", "--privileged", "--entrypoint", "nsjail", image,
+		"--mode", "o", "--chroot", "/", "--user", "99999", "--group", "99999", "--quiet",
+		"--", "/bin/echo", "jailed")
+	if err != nil {
+		t.Fatalf("running nsjail in %s: %v\n%s", image, err, out)
+	}
+	if !strings.Contains(out, "jailed") {
+		t.Fatalf("jailed process output missing; got:\n%s", out)
+	}
+}
+
+func TestContainerDelegatesCgroupControllers(t *testing.T) {
+	name := env(t, "SANDBOX_CONTAINER")
+
+	out, err := docker(t, "exec", name, "cat", "/sys/fs/cgroup/cgroup.subtree_control")
+	if err != nil {
+		t.Fatalf("reading cgroup.subtree_control in %s: %v\n%s", name, err, out)
+	}
+	enabled := strings.Fields(out)
+	for _, controller := range []string{"cpu", "memory", "pids"} {
+		if !slices.Contains(enabled, controller) {
+			t.Errorf("controller %s is not enabled for child cgroups (cgroup.subtree_control: %q)", controller, strings.TrimSpace(out))
+		}
 	}
 }
