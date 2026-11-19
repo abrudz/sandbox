@@ -4,6 +4,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -14,7 +16,7 @@ import (
 	"github.com/abrudz/sandbox/internal/sandbox"
 )
 
-// Options configures the handler.
+// Options configures the handler. A limit of zero means no limit.
 type Options struct {
 	// Executor runs submitted programs.
 	Executor sandbox.Executor
@@ -40,28 +42,60 @@ type Options struct {
 
 // Server is the runner's HTTP handler.
 type Server struct {
-	opts Options
-	mux  *http.ServeMux
+	opts      Options
+	mux       *http.ServeMux
+	admission admission
 }
 
 // NewHandler returns the runner's HTTP handler.
 func NewHandler(opts Options) *Server {
-	s := &Server{opts: opts, mux: http.NewServeMux()}
+	s := &Server{
+		opts: opts,
+		mux:  http.NewServeMux(),
+		admission: admission{
+			drained:   make(chan struct{}),
+			perClient: map[string]int{},
+			starts:    map[string][]time.Time{},
+		},
+	}
 	s.mux.HandleFunc("GET /healthz", healthz)
 	s.mux.HandleFunc("POST /api/v1/run", s.run)
 	s.mux.HandleFunc("GET /api/v1/version", s.version)
 	return s
 }
 
-// ServeHTTP implements http.Handler.
+// ServeHTTP implements http.Handler. While draining, every new request
+// gets 503, so a proxy in front stops sending traffic.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.admission.mu.Lock()
+	draining := s.admission.draining
+	s.admission.mu.Unlock()
+	if draining {
+		http.Error(w, "the service is shutting down", http.StatusServiceUnavailable)
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
 // Drain makes every new request answer 503 and returns once the runs in
-// progress have finished, or when ctx is done.
+// progress have finished, or ctx's error when ctx is done first.
 func (s *Server) Drain(ctx context.Context) error {
-	return nil
+	a := &s.admission
+	a.mu.Lock()
+	if !a.draining {
+		a.draining = true
+		if a.active == 0 {
+			close(a.drained)
+		}
+	}
+	a.mu.Unlock()
+
+	select {
+	case <-a.drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // healthz reports that the API is serving requests.
@@ -93,13 +127,19 @@ type runResponse struct {
 // run executes one program. Every completed run answers 200, whatever the
 // program's exit status; 503 means the sandbox could not run it.
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
-	var req runRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "malformed request: "+err.Error(), http.StatusBadRequest)
+	req, status, reason := s.decode(w, r)
+	if status != 0 {
+		http.Error(w, reason, status)
 		return
 	}
-	job := sandbox.Job{Code: []byte(req.Code), Input: []byte(req.Input), Args: req.Args}
+	release, status, reason := s.admit(s.clientOf(r))
+	if status != 0 {
+		http.Error(w, reason, status)
+		return
+	}
+	defer release()
 
+	job := sandbox.Job{Code: []byte(req.Code), Input: []byte(req.Input), Args: req.Args}
 	result, err := s.opts.Executor.Run(r.Context(), job)
 	if err != nil {
 		if r.Context().Err() != nil {
@@ -127,6 +167,36 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		resp.Signal = &result.Signal
 	}
 	writeJSON(w, resp)
+}
+
+// decode reads and validates a run request, or returns the status and
+// reason for refusing it.
+func (s *Server) decode(w http.ResponseWriter, r *http.Request) (runRequest, int, string) {
+	var req runRequest
+	body := r.Body
+	if s.opts.RequestLimit > 0 {
+		body = http.MaxBytesReader(w, r.Body, s.bodyLimit())
+	}
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return req, http.StatusRequestEntityTooLarge, "request body too large"
+		}
+		return req, http.StatusBadRequest, "malformed request: " + err.Error()
+	}
+	if len(req.Args) > maxArgs {
+		return req, http.StatusBadRequest, fmt.Sprintf("at most %d arguments are allowed", maxArgs)
+	}
+	for _, arg := range req.Args {
+		if len(arg) > maxArgLen {
+			return req, http.StatusBadRequest, fmt.Sprintf("an argument may be at most %d bytes", maxArgLen)
+		}
+	}
+	if s.opts.RequestLimit > 0 && len(req.Code)+len(req.Input) > s.opts.RequestLimit {
+		return req, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("code and input may be at most %d bytes together", s.opts.RequestLimit)
+	}
+	return req, 0, ""
 }
 
 // version reports the interpreter version that runs programs.

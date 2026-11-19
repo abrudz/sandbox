@@ -1,11 +1,18 @@
 // Command runner-api serves the sandbox runner's HTTP API on port 8080.
+//
+// On SIGTERM or SIGINT it stops accepting runs (new requests get 503), lets
+// the runs in progress finish, and exits with status 0.
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/abrudz/sandbox/internal/api"
@@ -27,10 +34,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	version, err := os.ReadFile(versionFile)
+	versionBytes, err := os.ReadFile(versionFile)
 	if err != nil {
 		log.Fatalf("reading the Dyalog version: %v", err)
 	}
+	version := strings.TrimSpace(string(versionBytes))
 	if err := os.MkdirAll(jobsDir, 0o711); err != nil {
 		log.Fatalf("creating %s: %v", jobsDir, err)
 	}
@@ -48,17 +56,50 @@ func main() {
 		Workspace:   limits.Workspace(),
 		Logf:        log.Printf,
 	}
+	handler := api.NewHandler(api.Options{
+		Executor:          executor,
+		DyalogVersion:     version,
+		RequestLimit:      limits.RequestLimit,
+		Concurrency:       limits.Concurrency,
+		ClientConcurrency: limits.ClientConcurrency,
+		ClientRate:        limits.ClientRate,
+		TrustedProxies:    limits.TrustedProxies,
+	})
 	srv := &http.Server{
-		Addr: ":8080",
-		Handler: api.NewHandler(api.Options{
-			Executor:      executor,
-			DyalogVersion: strings.TrimSpace(string(version)),
-		}),
+		Addr:              ":8080",
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- srv.ListenAndServe() }()
 	log.Printf("runner-api listening on %s (Dyalog %s; per run: timeout %v, output %d bytes per stream, "+
-		"memory %d bytes, workspace %d bytes, %g CPUs, %d processes)",
-		srv.Addr, strings.TrimSpace(string(version)), limits.Timeout, limits.OutputLimit,
-		limits.Memory, limits.Workspace(), limits.CPUs, limits.Pids)
-	log.Fatal(srv.ListenAndServe())
+		"memory %d bytes, workspace %d bytes, %g CPUs, %d processes; requests: %d bytes, "+
+		"%d runs at once, %d per client, %d per client per minute; trusted proxies %v)",
+		srv.Addr, version, limits.Timeout, limits.OutputLimit,
+		limits.Memory, limits.Workspace(), limits.CPUs, limits.Pids, limits.RequestLimit,
+		limits.Concurrency, limits.ClientConcurrency, limits.ClientRate, limits.TrustedProxies)
+
+	select {
+	case err := <-served:
+		log.Fatal(err)
+	case <-stop.Done():
+	}
+
+	// A run lasts at most its timeout plus the executor's grace period for
+	// stopping it, so draining is bounded.
+	log.Printf("draining: new requests get 503")
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), limits.Timeout+5*time.Second)
+	defer cancelDrain()
+	if err := handler.Drain(drainCtx); err != nil {
+		log.Printf("draining: %v", err)
+	}
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("shutting down: %v", err)
+	}
+	log.Printf("stopped")
 }

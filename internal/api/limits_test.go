@@ -37,7 +37,7 @@ func (b *blockingExecutor) Run(ctx context.Context, _ sandbox.Job) (sandbox.Resu
 // waitStarted waits until n runs have reached the executor.
 func (b *blockingExecutor) waitStarted(t *testing.T, n int) {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		select {
 		case <-b.started:
 		case <-time.After(5 * time.Second):
@@ -80,6 +80,12 @@ func post(h http.Handler, addr, body string, header ...string) int {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func health(h http.Handler) int {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	return rec.Code
 }
 
@@ -265,12 +271,17 @@ func TestDrainAnswers503ToNewRequestsAndWaitsForRunsInProgress(t *testing.T) {
 	drained := make(chan error, 1)
 	go func() { drained <- h.Drain(context.Background()) }()
 
+	// /healthz shows when draining has begun without itself starting a run
+	// that the blocking executor would hold.
 	deadline := time.Now().Add(time.Second)
-	for post(h, "192.0.2.2", okBody) != http.StatusServiceUnavailable {
+	for health(h) != http.StatusServiceUnavailable {
 		if time.Now().After(deadline) {
-			t.Fatal("new runs were still accepted a second after Drain began")
+			t.Fatal("/healthz still answered 200 a second after Drain began")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if got := post(h, "192.0.2.2", okBody); got != http.StatusServiceUnavailable {
+		t.Errorf("new run while draining: status %d, want 503", got)
 	}
 	select {
 	case err := <-drained:
