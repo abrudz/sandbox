@@ -1,0 +1,279 @@
+//go:build integration
+
+package integration
+
+import (
+	"fmt"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The defaults from the plan's Sandbox limits table, beyond those in
+// limits_test.go.
+const defaultPids = 64
+
+// processCountCode has a child of ⎕SH fork up to n sleeping processes, then
+// print how many processes the run can see. Perl stops at the first failed
+// fork and counts without creating a process; dash, the shell ⎕SH runs,
+// exits when a fork fails.
+func processCountCode(n int) string {
+	return fmt.Sprintf(`{⎕←⍵}¨⎕SH'perl -e ''for (1..%d) { defined(my $pid = fork) or last; if (!$pid) { close STDOUT; close STDERR; sleep 30; exit } } opendir my $d, "/proc"; print scalar(grep { /^\d+$/ } readdir $d), "\n"'''`+"\n", n)
+}
+
+// childAllocationCode has a child of ⎕SH buffer bytes bytes in memory and
+// prints the child's exit status; 137 means SIGKILL.
+func childAllocationCode(bytes int) string {
+	return fmt.Sprintf(`{⎕←⍵}¨⎕SH'head -c %d /dev/zero | tail > /dev/null; echo "status $?"'`+"\n", bytes)
+}
+
+// busyLoop is a shell command that keeps one CPU busy for two seconds.
+const busyLoop = `timeout 2 sh -c "while :; do :; done"`
+
+func firstLineInt(t *testing.T, r runResponse) int64 {
+	t.Helper()
+	l := lines(r.Stdout)
+	if len(l) == 0 {
+		t.Fatalf("no output; %s", describe(r))
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(l[0]), 10, 64)
+	if err != nil {
+		t.Fatalf("first output line %q is not an integer; %s", l[0], describe(r))
+	}
+	return n
+}
+
+// describe summarises a run for failure messages.
+func describe(r runResponse) string {
+	exit, signal := "null", "null"
+	if r.ExitCode != nil {
+		exit = strconv.Itoa(*r.ExitCode)
+	}
+	if r.Signal != nil {
+		signal = *r.Signal
+	}
+	return fmt.Sprintf("exit %s, signal %s, timedOut %v, wall %d ms, stdout %q, stderr %q",
+		exit, signal, r.TimedOut, r.WallTimeMs, r.Stdout, r.Stderr)
+}
+
+// assertRunLines is assertLines on a run's stdout, reporting the whole run
+// when the lines differ.
+func assertRunLines(t *testing.T, r runResponse, want ...string) {
+	t.Helper()
+	if got := lines(r.Stdout); !slices.Equal(got, want) {
+		t.Errorf("output lines %q, want %q; %s", got, want, describe(r))
+	}
+}
+
+func TestRunCannotOpenAnOutboundTCPConnection(t *testing.T) {
+	r := run(t, `{⎕←⍵}¨⎕SH'bash -c ''exec 3<>/dev/tcp/1.1.1.1/80'' 2>&1; echo "exit $?"'`+"\n", "")
+
+	if !strings.Contains(r.Stdout, "Network is unreachable") {
+		t.Errorf("output %q does not report an unreachable network", r.Stdout)
+	}
+	if strings.Contains(r.Stdout, "exit 0") {
+		t.Errorf("the connection succeeded: %q", r.Stdout)
+	}
+}
+
+func TestRunCannotWriteOutsideTmpAndHome(t *testing.T) {
+	r := run(t, "{⎕←⍵}¨{0::'failed' ⋄ _←(⊂'a')⎕NPUT ⍵ ⋄ 'written'}¨'/marker' '/usr/marker' '/etc/marker' '/opt/mdyalog/marker' '/job/marker'\n", "")
+
+	assertRunLines(t, r, "failed", "failed", "failed", "failed", "failed")
+}
+
+func TestRunCannotWriteMoreThanTheTmpfsLimitToTmpOrHome(t *testing.T) {
+	// Each tmpfs holds 16 MiB: the first 10 MB file fits, the second does not.
+	r := run(t, `home←2⎕NQ#'GetEnvironment' 'HOME'
+write←{0::'failed' ⋄ _←(⊂10e6⍴'x')⎕NPUT ⍵ ⋄ 'written'}
+{⎕←⍵}¨write¨'/tmp/a' '/tmp/b' (home,'/a') (home,'/b')
+`, "")
+
+	assertRunLines(t, r, "written", "failed", "written", "failed")
+}
+
+func TestFilesDoNotSurviveFromOneRunToTheNext(t *testing.T) {
+	first := run(t, `home←2⎕NQ#'GetEnvironment' 'HOME'
+_←(⊂'a')⎕NPUT'/tmp/marker'
+_←(⊂'a')⎕NPUT home,'/marker'
+⎕←⎕NEXISTS'/tmp/marker' (home,'/marker')
+`, "")
+	assertRunLines(t, first, "1 1")
+
+	second := run(t, "home←2⎕NQ#'GetEnvironment' 'HOME'\n⎕←⎕NEXISTS'/tmp/marker' (home,'/marker')\n", "")
+
+	assertRunLines(t, second, "0 0")
+}
+
+func TestAllocatingPastMAXWSGivesWSFULL(t *testing.T) {
+	r := run(t, "x←1e9⍴0.5\n⎕←'allocated'\n", "")
+
+	if !strings.Contains(r.Stderr, "WS FULL") {
+		t.Errorf("stderr %q does not report WS FULL", r.Stderr)
+	}
+	if strings.Contains(r.Stdout, "allocated") {
+		t.Errorf("an 8 GB array was allocated")
+	}
+}
+
+// assertKilledForMemory checks that an out-of-memory kill ended the whole
+// run: the interpreter was killed with its child, before printing the
+// child's status, and not by the time limit.
+func assertKilledForMemory(t *testing.T, r runResponse) {
+	t.Helper()
+	if r.Signal == nil || *r.Signal != "SIGKILL" || r.TimedOut || strings.Contains(r.Stdout, "status") {
+		t.Errorf("want the whole run killed with SIGKILL, before the time limit; %s", describe(r))
+	}
+}
+
+func TestAChildPastTheMemoryLimitEndsTheWholeRunAndTheServiceKeepsServing(t *testing.T) {
+	r := run(t, childAllocationCode(1_000_000_000), "")
+
+	assertKilledForMemory(t, r)
+	after := run(t, "⎕←'still serving'\n", "")
+	assertRunLines(t, after, "still serving")
+}
+
+func TestProcessCreationStopsAtTheProcessLimit(t *testing.T) {
+	r := run(t, processCountCode(500), "")
+
+	if n := firstLineInt(t, r); n > defaultPids || n < 10 {
+		t.Errorf("the run saw %d processes, want between 10 and %d", n, defaultPids)
+	}
+	if r.TimedOut {
+		t.Errorf("the run timed out instead of ending")
+	}
+	assertExitCode(t, r, 0)
+}
+
+func TestTwoBusyProcessesShareOneCPU(t *testing.T) {
+	r := run(t, "_←⎕SH'"+busyLoop+" & "+busyLoop+"; wait'\n", "")
+
+	assertExitCode(t, r, 0)
+	cpu, wall := r.UserTimeMs+r.SysTimeMs, r.WallTimeMs
+	if float64(cpu) > 1.2*float64(wall) {
+		t.Errorf("CPU time %d ms in %d ms wall-clock time, want at most one CPU", cpu, wall)
+	}
+	if float64(cpu) < 0.7*float64(wall) {
+		t.Errorf("CPU time %d ms in %d ms wall-clock time: the busy loops did not run", cpu, wall)
+	}
+}
+
+func TestBlockedSystemCallThroughQuadNAFailsWithEPERM(t *testing.T) {
+	// 268435456 is CLONE_NEWUSER. The kernel refuses it in a multithreaded
+	// process such as the interpreter with EINVAL; a seccomp filter runs
+	// before the kernel sees the call, so EPERM comes only from the policy.
+	r := run(t, `⎕NA'I4 libc.so.6|unshare I4'
+⎕NA'P libc.so.6|__errno_location'
+⎕NA'libc.so.6|memcpy >I4[1] P P'
+result←unshare 268435456
+errno←⊃memcpy 1 __errno_location 4
+⎕←result errno
+`, "")
+
+	assertRunLines(t, r, "¯1 1")
+}
+
+func TestRunIsUnprivilegedAndSeesOnlyItsOwnProcesses(t *testing.T) {
+	r := run(t, `{⎕←⍵}¨⎕SH'id -u; grep CapEff /proc/self/status; cat /proc/[0-9]*/comm'`+"\n", "")
+
+	out := lines(r.Stdout)
+	if len(out) < 3 {
+		t.Fatalf("output %q too short; stderr %q", r.Stdout, r.Stderr)
+	}
+	if out[0] == "0" {
+		t.Errorf("the program runs as root")
+	}
+	if f := strings.Fields(out[1]); len(f) != 2 || f[1] != "0000000000000000" {
+		t.Errorf("effective capabilities %q, want none", out[1])
+	}
+	for _, name := range out[2:] {
+		if slices.Contains([]string{"tini", "entrypoint", "runner-api", "nsjail"}, name) {
+			t.Errorf("the run can see %s; processes visible: %q", name, out[2:])
+		}
+	}
+}
+
+func TestConcurrentRunsCannotSeeEachOthersFilesOrProcesses(t *testing.T) {
+	url, container := startContainer(t)
+	firstDone := make(chan error, 1)
+	go func() {
+		body := `{"code":"home←2⎕NQ#'GetEnvironment' 'HOME'\n_←(⊂'a')⎕NPUT'/tmp/first-run'\n_←(⊂'a')⎕NPUT home,'/first-run'\n_←⎕SH'sleep 5.000123 >/dev/null 2>&1 &'\n⎕DL 5\n","input":"","args":[]}`
+		resp, err := client.Post(url+"/api/v1/run", "application/json", strings.NewReader(body))
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				err = fmt.Errorf("status %d", resp.StatusCode)
+			}
+		}
+		firstDone <- err
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !slices.ContainsFunc(leftovers(t, container), func(l string) bool { return strings.HasSuffix(l, " sleep") }) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the first run's sleep did not start within 10 s")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// grep's own command line holds "5[.]000123", which the pattern does not match.
+	second := runAt(t, url, `home←2⎕NQ#'GetEnvironment' 'HOME'
+⎕←⎕NEXISTS'/tmp/first-run' (home,'/first-run')
+⎕←⊃⎕SH'cat /proc/[0-9]*/cmdline 2>/dev/null | tr "\0" " " | grep -c "5[.]000123" || true'
+`, "")
+
+	assertRunLines(t, second, "0 0", "0")
+	if err := <-firstDone; err != nil {
+		t.Errorf("first run: %v", err)
+	}
+}
+
+func TestSandboxPidsSetsTheProcessLimit(t *testing.T) {
+	url, _ := startContainer(t, "SANDBOX_PIDS=20")
+
+	r := runAt(t, url, processCountCode(100), "")
+
+	if n := firstLineInt(t, r); n > 20 {
+		t.Errorf("the run saw %d processes, want at most 20 with SANDBOX_PIDS=20", n)
+	}
+}
+
+func TestSandboxMemorySetsTheMemoryLimit(t *testing.T) {
+	// Under the default 512 MiB limit a 200 MB child completes...
+	fits := run(t, childAllocationCode(200_000_000), "")
+	assertRunLines(t, fits, "status 0")
+
+	// ...and with SANDBOX_MEMORY=128M it ends the run.
+	url, _ := startContainer(t, "SANDBOX_MEMORY=128M")
+	r := runAt(t, url, childAllocationCode(200_000_000), "")
+
+	assertKilledForMemory(t, r)
+}
+
+func TestSandboxMemorySetsTheWorkspaceToHalfTheMemoryLimit(t *testing.T) {
+	url, _ := startContainer(t, "SANDBOX_MEMORY=128M")
+
+	r := runAt(t, url, "⎕←⎕WA\n", "")
+
+	if wa := firstLineInt(t, r); wa <= 0 || wa > 64<<20 {
+		t.Errorf("⎕WA %d, want at most %d (half of 128 MiB)", wa, 64<<20)
+	}
+}
+
+func TestSandboxCpusSetsTheCPULimit(t *testing.T) {
+	url, _ := startContainer(t, "SANDBOX_CPUS=0.5")
+
+	r := runAt(t, url, "_←⎕SH'"+busyLoop+"; true'\n", "")
+
+	cpu, wall := r.UserTimeMs+r.SysTimeMs, r.WallTimeMs
+	if float64(cpu) > 0.6*float64(wall) {
+		t.Errorf("CPU time %d ms in %d ms wall-clock time, want at most half a CPU", cpu, wall)
+	}
+	if float64(cpu) < 0.3*float64(wall) {
+		t.Errorf("CPU time %d ms in %d ms wall-clock time: the busy loop did not run", cpu, wall)
+	}
+}

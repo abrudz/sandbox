@@ -1,0 +1,32 @@
+--- a/cgroup2.cc
++++ b/cgroup2.cc
+@@ -222,6 +222,13 @@
+ 	if (nsj->njc.cgroup_mem_max() > (size_t)0) {
+ 		RETURN_ON_FAILURE(writeToCgroup(
+ 		    cgroup_path, "memory.max", std::to_string(nsj->njc.cgroup_mem_max())));
++		/*
++		 * Local change (github.com/abrudz/sandbox): an out-of-memory kill
++		 * takes every process in the jail. Otherwise a second OOM event,
++		 * raised before the first victim's memory is freed, can pick any
++		 * survivor, such as the jail's main program.
++		 */
++		RETURN_ON_FAILURE(writeToCgroup(cgroup_path, "memory.oom.group", "1"));
+ 	}
+ 
+ 	if (swap_max >= (ssize_t)0) {
+@@ -255,9 +262,13 @@
+ 	 * The maximum bandwidth limit in the format: `$MAX $PERIOD`.
+ 	 * This indicates that the group may consume up to $MAX in each $PERIOD
+ 	 * duration.
++	 *
++	 * Local change (github.com/abrudz/sandbox): a 100 ms period, as Docker
++	 * uses, instead of 1 s, so a jail cannot spend a whole second's quota in
++	 * one burst and the limit holds over short intervals.
+ 	 */
+-	std::string cpu_ms_per_sec_str = std::to_string(nsj->njc.cgroup_cpu_ms_per_sec() * 1000U);
+-	cpu_ms_per_sec_str += " 1000000";
++	std::string cpu_ms_per_sec_str = std::to_string(nsj->njc.cgroup_cpu_ms_per_sec() * 100U);
++	cpu_ms_per_sec_str += " 100000";
+ 	return writeToCgroup(cgroup_path, "cpu.max", cpu_ms_per_sec_str);
+ }
+ 
