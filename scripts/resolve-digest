@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# resolve-digest REFERENCE
+#
+# Prints the digest REFERENCE currently points to in its registry. For a
+# multi-platform image this is the digest of its index, which is what a
+# build pinned to it resolves.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: $0 REFERENCE" >&2
+	exit 2
+fi
+docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -er .digest

@@ -6,6 +6,9 @@
 # stage installs them and fails the build if any library is still missing.
 ARG DEBIAN_RELEASE=trixie
 ARG NSJAIL_VERSION=3.6
+# scripts/build-image pins the upstream image by digest; a plain build
+# takes the tag as it is.
+ARG DYALOG_IMAGE=docker.io/dyalog/dyalog:latest
 
 FROM docker.io/library/debian:${DEBIAN_RELEASE}-slim AS nsjail
 ARG NSJAIL_VERSION
@@ -36,7 +39,7 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -o /out/runner-api ./cmd/runner-api
 
-FROM docker.io/dyalog/dyalog:latest
+FROM ${DYALOG_IMAGE}
 # The entry point configures cgroups and nsjail creates namespaces; both
 # need root inside the container. Runs execute as an unprivileged uid.
 USER root
@@ -58,6 +61,20 @@ RUN mkdir -p /usr/share/sandbox \
  && dyalogscript /tmp/version.apls | tr -d '\r\n' > /usr/share/sandbox/dyalog-version \
  && rm /tmp/version.apls \
  && grep -Eqx '[0-9]+(\.[0-9]+)+' /usr/share/sandbox/dyalog-version
+# Where the image came from, for GET /api/v1/version and the labels.
+# scripts/build-image sets these; a plain build leaves the digest and the
+# commit empty.
+ARG DYALOG_BASE_NAME=docker.io/dyalog/dyalog:latest
+ARG DYALOG_DIGEST=
+ARG COMMIT=
+LABEL org.opencontainers.image.title="sandbox" \
+      org.opencontainers.image.description="Sandboxed Dyalog APL runner" \
+      org.opencontainers.image.source="https://github.com/abrudz/sandbox" \
+      org.opencontainers.image.base.name="${DYALOG_BASE_NAME}" \
+      org.opencontainers.image.base.digest="${DYALOG_DIGEST}" \
+      org.opencontainers.image.revision="${COMMIT}"
+RUN printf '%s\n' "${DYALOG_DIGEST}" > /usr/share/sandbox/image-digest \
+ && printf '%s\n' "${COMMIT}" > /usr/share/sandbox/commit
 # Dyalog's licence stays at /LICENSE, where the base image puts it.
 COPY THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 COPY LICENSE /usr/share/doc/sandbox/LICENSE

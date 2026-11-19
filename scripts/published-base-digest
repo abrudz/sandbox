@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# published-base-digest IMAGE
+#
+# Prints the org.opencontainers.image.base.digest label of IMAGE as it is
+# in its registry: the digest of the upstream image it was built from.
+# Prints nothing, and reports why on stderr, when IMAGE cannot be read or
+# has no such label; the caller then treats the upstream as changed.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: $0 IMAGE" >&2
+	exit 2
+fi
+if ! config=$(docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>&1); then
+	echo "$0: cannot read $1: $config" >&2
+	exit 0
+fi
+# A single-platform image has one configuration; an index has one per
+# platform. Every configuration of an image carries the same labels.
+digest=$(jq -r '[.. | .Labels? | objects | .["org.opencontainers.image.base.digest"] | strings] | first // empty' <<<"$config")
+if [ -z "$digest" ]; then
+	echo "$0: $1 has no org.opencontainers.image.base.digest label" >&2
+fi
+printf '%s' "$digest"
