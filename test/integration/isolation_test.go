@@ -119,10 +119,20 @@ func TestAllocatingPastMAXWSGivesWSFULL(t *testing.T) {
 	}
 }
 
-func TestAChildPastTheMemoryLimitIsKilledAndTheServiceKeepsServing(t *testing.T) {
+// assertKilledForMemory checks that an out-of-memory kill ended the whole
+// run: the interpreter was killed with its child, before printing the
+// child's status, and not by the time limit.
+func assertKilledForMemory(t *testing.T, r runResponse) {
+	t.Helper()
+	if r.Signal == nil || *r.Signal != "SIGKILL" || r.TimedOut || strings.Contains(r.Stdout, "status") {
+		t.Errorf("want the whole run killed with SIGKILL, before the time limit; %s", describe(r))
+	}
+}
+
+func TestAChildPastTheMemoryLimitEndsTheWholeRunAndTheServiceKeepsServing(t *testing.T) {
 	r := run(t, childAllocationCode(1_000_000_000), "")
 
-	assertRunLines(t, r, "status 137")
+	assertKilledForMemory(t, r)
 	after := run(t, "⎕←'still serving'\n", "")
 	assertRunLines(t, after, "still serving")
 }
@@ -233,11 +243,15 @@ func TestSandboxPidsSetsTheProcessLimit(t *testing.T) {
 }
 
 func TestSandboxMemorySetsTheMemoryLimit(t *testing.T) {
-	url, _ := startContainer(t, "SANDBOX_MEMORY=128M")
+	// Under the default 512 MiB limit a 200 MB child completes...
+	fits := run(t, childAllocationCode(200_000_000), "")
+	assertRunLines(t, fits, "status 0")
 
+	// ...and with SANDBOX_MEMORY=128M it ends the run.
+	url, _ := startContainer(t, "SANDBOX_MEMORY=128M")
 	r := runAt(t, url, childAllocationCode(200_000_000), "")
 
-	assertRunLines(t, r, "status 137")
+	assertKilledForMemory(t, r)
 }
 
 func TestSandboxMemorySetsTheWorkspaceToHalfTheMemoryLimit(t *testing.T) {

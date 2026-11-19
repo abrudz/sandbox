@@ -15,6 +15,9 @@ nsjail 3.6
   Copyright 2014 Google Inc. All Rights Reserved.
   Licensed under the Apache License, Version 2.0 (text below).
   Installed as /usr/local/bin/nsjail.
+  Modified: cgroup2.cc is changed by image/nsjail.patch in this project's
+  repository (out-of-memory kills take the whole jail; the CPU limit uses
+  a 100 ms period). The changed lines are marked "Local change".
 
 Kafel, revision 76d0f41bf3eb5c4008713d64b9767b461a9129a3
   https://github.com/google/kafel

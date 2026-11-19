@@ -18,6 +18,10 @@ RUN git clone --branch "${NSJAIL_VERSION}" --depth 1 \
       --recurse-submodules --shallow-submodules \
       https://github.com/google/nsjail.git /src/nsjail
 WORKDIR /src/nsjail
+# Local changes to cgroup2.cc: an out-of-memory kill takes the whole jail,
+# and the CPU limit uses a 100 ms period; see the patch for why.
+COPY image/nsjail.patch /src/nsjail.patch
+RUN git apply /src/nsjail.patch
 RUN make -j"$(nproc)" \
  && mkdir -p /out \
  && cp nsjail /out/nsjail \
