@@ -147,9 +147,12 @@ nav > *:not(:last-child) {
 	margin-right: 4%;
 }
 
+/* The site name needs its full width, which the 22% limit for TIO's logo
+   would clip on a phone; the three buttons still fit at 320px. */
 #site {
 	font-size: 20px;
 	font-weight: 600;
+	max-width: none;
 }
 
 body {
