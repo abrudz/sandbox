@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# build-image TAG [UPSTREAM [DIGEST]]
+#
+# Builds the sandbox image from the checked-out commit as TAG: the image CI
+# tests and the publish workflow pushes. UPSTREAM, docker.io/dyalog/dyalog:
+# latest by default, is pinned to DIGEST, or to its current digest when
+# DIGEST is empty. The upstream name and digest, the commit and the Dyalog
+# version go into the image's OCI labels, and GET /api/v1/version reports
+# the same values.
+set -euo pipefail
+
+if [ $# -lt 1 ] || [ $# -gt 3 ]; then
+	echo "usage: $0 TAG [UPSTREAM [DIGEST]]" >&2
+	exit 2
+fi
+tag=$1
+upstream=${2:-docker.io/dyalog/dyalog:latest}
+digest=${3:-}
+
+case $upstream in
+*@*)
+	echo "$0: give UPSTREAM as a tag; its digest is resolved or passed separately" >&2
+	exit 2
+	;;
+esac
+# The repository is the reference without its tag. A colon before the last
+# slash belongs to a registry port, not a tag.
+repository=$upstream
+if [[ ${upstream##*/} == *:* ]]; then
+	repository=${upstream%:*}
+fi
+
+scripts=$(dirname "$0")
+if [ -z "$digest" ]; then
+	digest=$("$scripts/resolve-digest" "$upstream")
+fi
+cd "$(git -C "$scripts" rev-parse --show-toplevel)"
+commit=$(git rev-parse HEAD)
+
+echo "Building $tag from $repository@$digest ($upstream) at $commit"
+docker build --progress=plain \
+	--build-arg DYALOG_IMAGE="$repository@$digest" \
+	--build-arg DYALOG_BASE_NAME="$upstream" \
+	--build-arg DYALOG_DIGEST="$digest" \
+	--build-arg COMMIT="$commit" \
+	-t "$tag" -f image/Containerfile .
+
+# The Dyalog version is known only once the image has run dyalogscript, so
+# its label is added to the built image without changing its layers.
+version=$(docker run --rm --entrypoint cat "$tag" /usr/share/sandbox/dyalog-version)
+printf 'FROM %s\n' "$tag" |
+	docker build --progress=plain --label org.opencontainers.image.version="$version" -t "$tag" -
+echo "Built $tag: Dyalog $version"

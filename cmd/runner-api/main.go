@@ -27,6 +27,8 @@ const (
 	nsjailConfig = "/etc/sandbox/nsjail.cfg"
 	jailCommand  = "/usr/local/bin/run"
 	versionFile  = "/usr/share/sandbox/dyalog-version"
+	digestFile   = "/usr/share/sandbox/image-digest"
+	commitFile   = "/usr/share/sandbox/commit"
 	webDir       = "/usr/share/sandbox/web"
 	jobsDir      = "/tmp/sandbox-jobs"
 )
@@ -36,11 +38,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	versionBytes, err := os.ReadFile(versionFile)
-	if err != nil {
-		log.Fatalf("reading the Dyalog version: %v", err)
-	}
-	version := strings.TrimSpace(string(versionBytes))
+	version := readImageFile(versionFile)
+	imageDigest := readImageFile(digestFile)
+	commit := readImageFile(commitFile)
 	if err := os.MkdirAll(jobsDir, 0o711); err != nil {
 		log.Fatalf("creating %s: %v", jobsDir, err)
 	}
@@ -67,6 +67,8 @@ func main() {
 		ClientRate:        limits.ClientRate,
 		TrustedProxies:    limits.TrustedProxies,
 		WebDir:            webDir,
+		ImageDigest:       imageDigest,
+		Commit:            commit,
 	})
 	srv := &http.Server{
 		Addr:              ":8080",
@@ -78,10 +80,10 @@ func main() {
 	defer cancel()
 	served := make(chan error, 1)
 	go func() { served <- srv.ListenAndServe() }()
-	log.Printf("runner-api listening on %s (Dyalog %s; per run: timeout %v, output %d bytes per stream, "+
+	log.Printf("runner-api listening on %s (Dyalog %s from %s, commit %s; per run: timeout %v, output %d bytes per stream, "+
 		"memory %d bytes, workspace %d bytes, %g CPUs, %d processes; requests: %d bytes, "+
 		"%d runs at once, %d per client, %d per client per minute; trusted proxies %v)",
-		srv.Addr, version, limits.Timeout, limits.OutputLimit,
+		srv.Addr, version, imageDigest, commit, limits.Timeout, limits.OutputLimit,
 		limits.Memory, limits.Workspace(), limits.CPUs, limits.Pids, limits.RequestLimit,
 		limits.Concurrency, limits.ClientConcurrency, limits.ClientRate, limits.TrustedProxies)
 
@@ -105,4 +107,14 @@ func main() {
 		log.Printf("shutting down: %v", err)
 	}
 	log.Printf("stopped")
+}
+
+// readImageFile returns the trimmed contents of a file the image build
+// writes, and exits if it is missing.
+func readImageFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("reading %s: %v", path, err)
+	}
+	return strings.TrimSpace(string(b))
 }

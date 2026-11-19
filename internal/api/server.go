@@ -211,7 +211,11 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request) (runRequest, int
 
 // version reports the interpreter version that runs programs.
 func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]string{"dyalogVersion": s.opts.DyalogVersion})
+	writeJSON(w, map[string]string{
+		"dyalogVersion": s.opts.DyalogVersion,
+		"imageDigest":   s.opts.ImageDigest,
+		"commit":        s.opts.Commit,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

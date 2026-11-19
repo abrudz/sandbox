@@ -1,0 +1,97 @@
+name: Image
+
+# Builds the image with scripts/build-image, runs the integration and UI
+# suites against it, and, when asked to, pushes it to GHCR. ci.yml calls
+# this on every push without publishing; publish.yml calls it to publish.
+on:
+  workflow_call:
+    inputs:
+      upstream:
+        description: Image to build from; empty means docker.io/dyalog/dyalog:latest
+        type: string
+        default: ""
+      digest:
+        description: Digest to pin the upstream image to; empty means its current digest
+        type: string
+        default: ""
+      publish:
+        description: Push latest and the Dyalog version tag to GHCR once every suite has passed
+        type: boolean
+        default: false
+
+jobs:
+  image:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    env:
+      SANDBOX_IMAGE: sandbox:ci
+      SANDBOX_CONTAINER: sandbox-ci
+      SANDBOX_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build image
+        env:
+          UPSTREAM: ${{ inputs.upstream }}
+          DIGEST: ${{ inputs.digest }}
+        run: scripts/build-image "$SANDBOX_IMAGE" "$UPSTREAM" "$DIGEST"
+
+      - name: Start container
+        # Every test run comes from this one client, so the per-minute limit
+        # is raised for the shared container; tests of the limit start
+        # containers of their own.
+        run: |
+          docker run -d --privileged --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
+            -e SANDBOX_CLIENT_RATE=100000 "$SANDBOX_IMAGE"
+          for _ in $(seq 30); do
+            if curl -s -o /dev/null "$SANDBOX_URL/"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The API did not accept connections within 30 seconds."
+          exit 1
+
+      - name: Integration tests
+        run: go test -tags integration -count=1 -v ./test/integration/...
+
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() }}
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: test/ui/package-lock.json
+
+      - name: UI tests
+        if: ${{ !cancelled() }}
+        working-directory: test/ui
+        # The runner image carries Chrome's shared libraries, so only the
+        # browser is downloaded; nothing comes from the Ubuntu archive.
+        timeout-minutes: 15
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install chromium
+          npx playwright test
+
+      # Runs only when every step above succeeded, so an image that fails
+      # any suite is never pushed.
+      - name: Publish
+        if: inputs.publish
+        env:
+          REPOSITORY: ghcr.io/${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$SANDBOX_IMAGE")
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for tag in latest "$version"; do
+            docker tag "$SANDBOX_IMAGE" "$REPOSITORY:$tag"
+            docker push "$REPOSITORY:$tag"
+          done
+          echo "::notice::Published $REPOSITORY:latest and $REPOSITORY:$version"
+
+      - name: Container logs
+        if: always()
+        run: docker logs "$SANDBOX_CONTAINER" || true
