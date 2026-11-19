@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint and unit tests
+    # Pushes to this repository already run CI; pull_request runs cover forks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: staticcheck
+        run: |
+          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 -tags integration ./...
+
+      - name: shellcheck
+        run: |
+          mapfile -t scripts < <(git ls-files -- image scripts deploy | xargs -r grep -lE '^#!.*\b(ba|da)?sh\b' || true)
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No shell scripts to check."
+            exit 0
+          fi
+          shellcheck "${scripts[@]}"
+
+      - name: Unit tests
+        run: go test -count=1 ./...
+
+  image:
+    name: Image and integration tests
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    env:
+      SANDBOX_IMAGE: sandbox:ci
+      SANDBOX_CONTAINER: sandbox-ci
+      SANDBOX_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build image
+        run: docker build --progress=plain -t "$SANDBOX_IMAGE" -f image/Containerfile .
+
+      - name: Start container
+        run: |
+          docker run -d --privileged --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 "$SANDBOX_IMAGE"
+          for _ in $(seq 30); do
+            if curl -s -o /dev/null "$SANDBOX_URL/"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The API did not accept connections within 30 seconds."
+          exit 1
+
+      - name: Integration tests
+        run: go test -tags integration -count=1 -v ./test/integration/...
+
+      - name: Container logs
+        if: always()
+        run: docker logs "$SANDBOX_CONTAINER" || true

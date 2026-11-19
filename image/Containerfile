@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+
+# nsjail is built on the Debian release the final stage is based on
+# (dyalog/dyalog:latest uses debian:trixie-slim). The build stage records
+# the Debian packages that provide nsjail's shared libraries; the final
+# stage installs them and fails the build if any library is still missing.
+ARG DEBIAN_RELEASE=trixie
+ARG NSJAIL_VERSION=3.6
+
+FROM docker.io/library/debian:${DEBIAN_RELEASE}-slim AS nsjail
+ARG NSJAIL_VERSION
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      autoconf bison ca-certificates flex g++ gcc git libnl-route-3-dev \
+      libprotobuf-dev libtool make pkg-config protobuf-compiler \
+ && rm -rf /var/lib/apt/lists/*
+RUN git clone --branch "${NSJAIL_VERSION}" --depth 1 \
+      --recurse-submodules --shallow-submodules \
+      https://github.com/google/nsjail.git /src/nsjail
+WORKDIR /src/nsjail
+RUN make -j"$(nproc)" \
+ && mkdir -p /out \
+ && cp nsjail /out/nsjail \
+ && ldd nsjail | awk '$2 == "=>" && $3 ~ /^\// { print $3 }' \
+      | xargs -r realpath | xargs -r dpkg -S | cut -d: -f1 | sort -u \
+      > /out/runtime-packages
+
+FROM docker.io/library/golang:1.24-bookworm AS runner-api
+WORKDIR /src
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -o /out/runner-api ./cmd/runner-api
+
+FROM docker.io/dyalog/dyalog:latest
+# The entry point configures cgroups and nsjail creates namespaces; both
+# need root inside the container. Runs execute as an unprivileged uid.
+USER root
+COPY --from=nsjail /out/runtime-packages /tmp/nsjail-runtime-packages
+RUN apt-get update \
+ && xargs -a /tmp/nsjail-runtime-packages apt-get install -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* /tmp/nsjail-runtime-packages
+COPY --from=nsjail /out/nsjail /usr/local/bin/nsjail
+RUN ! ldd /usr/local/bin/nsjail | grep 'not found'
+COPY --from=runner-api /out/runner-api /usr/local/bin/runner-api
+COPY image/entrypoint /usr/local/bin/entrypoint
+# Dyalog's licence stays at /LICENSE, where the base image puts it.
+COPY THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
+COPY LICENSE /usr/share/doc/sandbox/LICENSE
+ENTRYPOINT ["/usr/local/bin/entrypoint"]

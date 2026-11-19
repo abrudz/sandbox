@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# Entry point of the sandbox image. Runs as root in a privileged container
+# with a private cgroup namespace, where /sys/fs/cgroup is the container's
+# own cgroup.
+#
+# nsjail puts each run in a child cgroup with cpu, memory and pids limits,
+# so those controllers must be enabled for child cgroups. cgroup v2 refuses
+# that while processes sit in the parent (the "no internal processes"
+# rule), so every process in the container's cgroup first moves to the
+# leaf cgroup "init".
+
+set -euo pipefail
+
+cgroup=/sys/fs/cgroup
+
+mkdir -p "$cgroup/init"
+# A process listed in cgroup.procs can exit before it is moved; skip it.
+while read -r pid; do
+  echo "$pid" > "$cgroup/init/cgroup.procs" 2> /dev/null || true
+done < "$cgroup/cgroup.procs"
+echo "+cpu +memory +pids" > "$cgroup/cgroup.subtree_control"
+
+exec /usr/local/bin/runner-api "$@"

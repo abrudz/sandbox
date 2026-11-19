@@ -1,0 +1,8 @@
+# The build context holds only what image/Containerfile copies.
+*
+!go.mod
+!cmd/
+!internal/
+!image/
+!LICENSE
+!THIRD_PARTY_NOTICES
