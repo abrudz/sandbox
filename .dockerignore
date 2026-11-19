@@ -4,5 +4,6 @@
 !cmd/
 !internal/
 !image/
+!web/
 !LICENSE
 !THIRD_PARTY_NOTICES

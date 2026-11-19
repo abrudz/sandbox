@@ -1,0 +1,11 @@
+{
+  "name": "sandbox-ui-tests",
+  "private": true,
+  "description": "Browser tests for the sandbox frontend; see playwright.config.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

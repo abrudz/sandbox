@@ -1,4 +1,5 @@
-// Command runner-api serves the sandbox runner's HTTP API on port 8080.
+// Command runner-api serves the sandbox runner's HTTP API and its web
+// frontend on port 8080.
 //
 // On SIGTERM or SIGINT it stops accepting runs (new requests get 503), lets
 // the runs in progress finish, and exits with status 0.
@@ -26,6 +27,7 @@ const (
 	nsjailConfig = "/etc/sandbox/nsjail.cfg"
 	jailCommand  = "/usr/local/bin/run"
 	versionFile  = "/usr/share/sandbox/dyalog-version"
+	webDir       = "/usr/share/sandbox/web"
 	jobsDir      = "/tmp/sandbox-jobs"
 )
 
@@ -64,6 +66,7 @@ func main() {
 		ClientConcurrency: limits.ClientConcurrency,
 		ClientRate:        limits.ClientRate,
 		TrustedProxies:    limits.TrustedProxies,
+		WebDir:            webDir,
 	})
 	srv := &http.Server{
 		Addr:              ":8080",

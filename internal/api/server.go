@@ -38,6 +38,8 @@ type Options struct {
 	TrustedProxies []netip.Prefix
 	// Now is the clock for per-minute limits; nil means time.Now.
 	Now func() time.Time
+	// WebDir holds the frontend's files, served at /; empty serves none.
+	WebDir string
 }
 
 // Server is the runner's HTTP handler.
@@ -61,6 +63,9 @@ func NewHandler(opts Options) *Server {
 	s.mux.HandleFunc("GET /healthz", healthz)
 	s.mux.HandleFunc("POST /api/v1/run", s.run)
 	s.mux.HandleFunc("GET /api/v1/version", s.version)
+	if opts.WebDir != "" {
+		s.mux.Handle("GET /", http.FileServer(http.Dir(opts.WebDir)))
+	}
 	return s
 }
 
