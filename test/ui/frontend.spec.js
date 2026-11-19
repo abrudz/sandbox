@@ -180,7 +180,7 @@ test("the language bar sits above the navigation bar", async ({ page }) => {
     return Math.abs(n.y - (b.y + b.height)) <= 1;
   }).toBe(true);
   const n = await nav.boundingBox();
-  expect((await page.locator("#interpreter").boundingBox()).y).toBeGreaterThanOrEqual(n.y + n.height);
+  expect((await page.locator("#interpreter h2").boundingBox()).y).toBeGreaterThanOrEqual(n.y + n.height);
 });
 
 test("the language bar has no close button", async ({ page }) => {
