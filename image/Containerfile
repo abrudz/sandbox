@@ -51,6 +51,7 @@ RUN ! ldd /usr/local/bin/nsjail | grep 'not found'
 COPY --from=runner-api /out/runner-api /usr/local/bin/runner-api
 COPY image/entrypoint image/run /usr/local/bin/
 COPY image/nsjail.cfg /etc/sandbox/nsjail.cfg
+COPY web /usr/share/sandbox/web
 # runner-api reports this version; it is the interpreter's own answer.
 RUN mkdir -p /usr/share/sandbox \
  && printf '%s\n' "⎕←2⊃'.'⎕WG'APLVersion'" > /tmp/version.apls \

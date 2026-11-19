@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+	<!-- TIO's interpreter page (github.com/TryItOnline/tryitonline, MIT), reduced to APL (Dyalog Unicode). -->
+	<link rel="canonical" href="/">
+	<link rel="icon" href="data:,">
+	<meta name="apple-mobile-web-app-title" content="dyalog.run">
+	<meta name="application-name" content="dyalog.run">
+	<meta name="theme-color" content="#303030">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+	<meta charset="utf-8">
+	<title>dyalog.run</title>
+	<script src="/pako.min.js" defer></script>
+	<script src="/codec.js" defer></script>
+	<script src="/lb.js" defer></script>
+	<script src="/frontend.js" defer></script>
+	<link rel="stylesheet" href="/frontend.css">
+	<input type="radio" id="toggle-index" name="main-body">
+	<input type="radio" id="toggle-interpreter" name="main-body">
+	<input type="checkbox" id="toggle-permalink" name="drawers">
+	<nav class="hidden">
+		<a id="site" href="/" title="Start a new program.">dyalog.run</a>
+		<span id="run" title="Execute the program. (Ctrl-Enter) Click again to cancel." data-hotkey="R">
+			<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+				<g id="run-button">
+					<g id="gear">
+						<circle cx="16" cy="16" r="12.5"/>
+						<path id="tooth" d="M 13.5 0.2 A 16 16 0 0 1 18.5 0.2 L 21 16 L 11 16 Z"/>
+						<use xlink:href="#tooth" transform="rotate(45 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(90 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(135 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(180 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(225 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(270 16 16)"/>
+						<use xlink:href="#tooth" transform="rotate(315 16 16)"/>
+						<circle cx="16" cy="16" r="9" class="cut"/>
+					</g>
+					<path id ="play" d="M 13 10.804 L 22 16 L 13 21.196 Z"/>
+				</g>
+				<circle cx="16" cy="16" r="20" class="cutout" stroke-width="8"/>
+			</svg>
+		</span>
+		<label id="permalink" for="toggle-permalink" title="Save/store. Generates a permalink and opens the copy wizard. Click the arrow to go back." data-hotkey="S">
+			<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+				<g transform="rotate(315 16 16)" class="stroke unchecked" stroke-width="1.25">
+					<rect width="17" height="10" x="-3.5" y="11" rx="4.25" ry="5"/>
+					<rect width="12" height="5" x="-1" y="13.5" rx="3" ry="5"/>
+					<rect width="17" height="3" x="7.5" y="14.5" rx="1.5" ry="3" class="cut"/>
+					<rect width="17" height="10" x="18.5" y="11" rx="4.25" ry="5"/>
+					<rect width="12" height="5" x="21" y="13.5" rx="3" ry="5"/>
+				</g>
+				<path d="M 0 16 L 17 0 L 17 10 L 32 10 L 32 22 L 17 22 L 17 32 Z" class="checked"/>
+			</svg>
+		</label>
+	</nav>
+	<div id="main">
+		<div id="permalink-drawer">
+			<div class="main-body">
+				<h3>Plain URL</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='{{permalink}}'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="P"></span></label>
+				</div>
+				<h3>HTML</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='<a href="{{permalink}}" title="{{lang}} on dyalog.run">Try it on dyalog.run!</a>'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="H"></span></label>
+				</div>
+				<h3>Wiki markup</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='[{{permalink}} Try it on dyalog.run!]'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="W"></span></label>
+				</div>
+				<h3>Markdown</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='[Try it on dyalog.run!]({{permalink}} "{{lang}} on dyalog.run")'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="M"></span></label>
+				</div>
+				<h3>Code Golf submission (Stack Exchange)</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='# [{{lang}}], {{bytes}}{{nn}}{{prettifyHint}}{{markdownCode}}{{nn}}[Try it on dyalog.run!][dyalog.run-{{timestamp}}]{{nn}}[{{lang}}]: {{link}}{{n}}[dyalog.run-{{timestamp}}]: {{permalink}} "{{lang}} on dyalog.run"'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="G"></span></label>
+				</div>
+				<h3>BBCode</h3>
+				<div class="copy-entry">
+					<div class="copy-content">
+						<textarea data-base-height="48" data-format='[url={{permalink}}]Try it on dyalog.run![/url]'></textarea>
+					</div>
+					<label for="toggle-permalink"><span class="copy-button" data-hotkey="B"></span></label>
+				</div>
+			</div>
+		</div>
+		<div id="index" class="main-body"></div>
+		<div id="interpreter" class="main-body">
+			<h2>
+				<a id="lang-link">
+					<span id="lang-name"></span>
+				</a>
+				<span id="lang-version" class="prose" title="Interpreter version"></span>
+				<span id="lang-example" class="right">
+					<span>Hello World</span>
+					<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
+						<rect x="0" y="5" width="4" height="4"/>
+						<rect x="5" y="5" width="4" height="4"/>
+						<rect x="2.5" y="0" width="4" height="4"/>
+					</svg>
+				</span>
+			</h2>
+			<input type="checkbox" id="toggle-header">
+			<h3><label for="toggle-header"><span>Header</span></label></h3>
+			<textarea id="header"></textarea>
+			<input type="checkbox" id="toggle-code" checked>
+			<h3>
+				<label for="toggle-code"><span>Code</span></label>
+				<span id="code-info" class="prose right"></span>
+			</h3>
+			<textarea id="code" data-gramm_editor="false"></textarea>
+			<input type="checkbox" id="toggle-footer">
+			<h3><label for="toggle-footer"><span>Footer</span></label></h3>
+			<textarea id="footer"></textarea>
+			<input type="checkbox" id="toggle-input">
+			<h3><label for="toggle-input"><span>Input</span></label></h3>
+			<textarea id="input"></textarea>
+			<input type="checkbox" id="toggle-arguments">
+			<h3><label for="toggle-arguments"><span>Arguments</span></label></h3>
+			<div id="cla-wrapper" class="array-wrapper">
+				<div class="array">
+					<span class="array-add array-tail" onclick="addField(this)">
+						<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
+							<rect width="3" height="9" x="3"/>
+							<rect width="9" height="3" y="3"/>
+						</svg>
+						<span>add</span>
+					</span>
+				</div>
+			</div>
+			<input type="checkbox" id="toggle-output" checked>
+			<h3><label for="toggle-output"><span>Output</span></label></h3>
+			<textarea id="output" class="output read-only" readonly></textarea>
+			<input type="checkbox" id="toggle-debug" checked>
+			<h3><label for="toggle-debug"><span>Debug</span></label></h3>
+			<textarea id="debug" class="output read-only" readonly></textarea>
+		</div>
+	</div>
+	<div id="messages">
+		<div class="command-mode message">
+			<h4>Command mode</h4>
+			<div>You've pressed the Escape key and entered command mode. Press again to exit.</div>
+		</div>
+	</div>
+	<div class="main-body"><textarea id="dummy" readonly></textarea></div>
+	<div id="templates">
+		<div class="array">
+			<span class="array-add" onclick="addField(this)">
+				<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
+					<rect width="3" height="9" x="3"/>
+					<rect width="9" height="3" y="3"/>
+				</svg>
+				<span>add</span>
+			</span>
+			<span class="array-remove right" onclick="this.parentNode.parentNode.removeChild(this.parentNode)">
+				<span>remove</span>
+				<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
+					<rect width="9" height="3" y="3"/>
+				</svg>
+			</span>
+			<textarea></textarea>
+		</div>
+		<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
+			<path class="unchecked" d="M 0 0 L 0 9 L 9 4.5 Z"/>
+			<path class="checked" d="M 0 0 L 9 0 L 4.5 9 Z"/>
+		</svg>
+		<svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+			<rect width="19" height="28" x="12.5" y="3.5" rx="2" ry="2" class="stroke"/>
+			<rect width="9" height="6" x="17.5" y="0.5" rx="1" ry="1" class="stroke"/>
+			<rect width="9" height="3" x="17.5" y="0.5"/>
+			<rect width="18" height="6" x="-0.5" y="14.5" class="inset"/>
+			<path d="M 16 13 v 9 l 8 -4.5 z"/>
+		</svg>
+		<div class="message" onclick="this.parentNode.removeChild(this)"><h4>placeholder</h4><div></div></div>
+	</div>
+</html>

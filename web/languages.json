@@ -1,0 +1,21 @@
+{
+	"apl-dyalog": {
+		"name": "APL (Dyalog Unicode)",
+		"link": "https://www.dyalog.com/",
+		"encoding": "UTF-8",
+		"prettify": "apl",
+		"tests": {
+			"helloWorld": {
+				"request": [
+					{
+						"command": "F",
+						"payload": {
+							".code.tio": "⎕←'Hello, World!'"
+						}
+					}
+				],
+				"response": "Hello, World!"
+			}
+		}
+	}
+}
