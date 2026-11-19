@@ -24,11 +24,11 @@ function interpreterRunning() {
   return names.split("\n").includes("dyalog");
 }
 
-test("opening / shows the apl-dyalog interpreter page with TIO's sections and no language list", async ({ page }) => {
+test("opening / shows the Dyalog APL interpreter page with TIO's sections and no language list", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#interpreter")).toBeVisible();
-  await expect(page.locator("#lang-name")).toHaveText("APL (Dyalog Unicode)");
+  await expect(page.locator("#lang-name")).toHaveText("Dyalog APL");
   for (const section of ["Header", "Code", "Footer", "Input", "Arguments", "Output", "Debug"])
     await expect(page.locator("#interpreter h3 label span", { hasText: new RegExp(`^${section}$`) })).toBeVisible();
   await expect(page.locator("#results, #search, #lang-switch")).toHaveCount(0);
@@ -83,7 +83,7 @@ test("each permalink format is generated, and reopening the permalink restores e
     expect(format).toContain(url);
     expect(format).not.toMatch(/try it online|tio\.run/i);
   }
-  expect(formats[4]).toMatch(/^# \[APL \(Dyalog Unicode\)\], \d+ bytes/);
+  expect(formats[4]).toMatch(/^# \[Dyalog APL\], \d+ bytes/);
 
   const reopened = await context.newPage();
   await reopened.goto(url);
@@ -135,6 +135,70 @@ test("APL glyphs can be entered through the language bar and backtick key bindin
   await page.locator(".ngn_lb b", { hasText: /^⍳$/ }).click();
 
   await expect(code).toHaveValue("⍴⍳");
+});
+
+test("the page title is dyalog.run whatever the permalink", async ({ page }) => {
+  await page.goto("/" + fixtures.aplDyalog.fragment);
+  await expect(page.locator("#code")).toHaveValue(fixtures.aplDyalog.code);
+
+  await expect(page).toHaveTitle("dyalog.run");
+});
+
+test("the navigation bar shows the dyalog.run logo, which opens a new program", async ({ page }) => {
+  await page.goto("/" + fixtures.aplDyalog.fragment);
+  await expect(page.locator("#code")).toHaveValue(fixtures.aplDyalog.code);
+  const logo = page.getByRole("link", { name: "dyalog.run" });
+  await expect(logo.locator("svg")).toBeVisible();
+  await expect(logo).toHaveText("");
+
+  await logo.click();
+
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator("#code")).toHaveValue("");
+});
+
+test("the logo button is the size of the Run and permalink buttons on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+
+  const [logo, run, permalink] = await Promise.all(["#site", "#run", "#permalink"].map(s => page.locator(s).boundingBox()));
+  expect(logo.width).toBeCloseTo(run.width, 0);
+  expect(logo.height).toBeCloseTo(run.height, 0);
+  expect(permalink.width).toBeCloseTo(run.width, 0);
+});
+
+test("the language bar sits above the navigation bar", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+  const bar = page.locator(".ngn_lb");
+  const nav = page.locator("nav");
+
+  expect((await bar.boundingBox()).y).toBe(0);
+  await expect.poll(async () => {
+    const b = await bar.boundingBox(), n = await nav.boundingBox();
+    return Math.abs(n.y - (b.y + b.height)) <= 1;
+  }).toBe(true);
+  const n = await nav.boundingBox();
+  expect((await page.locator("#interpreter").boundingBox()).y).toBeGreaterThanOrEqual(n.y + n.height);
+});
+
+test("the language bar has no close button", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".ngn_lb b").first()).toBeVisible();
+
+  await expect(page.locator(".ngn_lb [title=Close]")).toHaveCount(0);
+  await expect(page.locator(".ngn_lb")).not.toContainText("\u274e");
+});
+
+test("code fields and the language bar use the APL387 font", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".ngn_lb b").first()).toBeVisible();
+
+  for (const selector of ["#code", "#debug", ".ngn_lb"])
+    expect(await page.locator(selector).evaluate(e => getComputedStyle(e).fontFamily)).toMatch(/^"?APL387"?(,|$)/);
+  await expect.poll(() => page.evaluate(() =>
+    [...document.fonts].some(face => face.family.replace(/"/g, "") === "APL387" && face.status === "loaded"))).toBe(true);
 });
 
 test("the page shows the Dyalog version", async ({ page, request }) => {
