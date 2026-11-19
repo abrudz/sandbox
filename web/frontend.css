@@ -223,6 +223,12 @@ h3 label {
 	text-indent: 0;
 }
 
+/* #main's font size is 0, so as inline boxes these would have no height of
+   their own; as inline blocks they take their contents' height. */
+.array-add, .array-remove {
+	display: inline-block;
+}
+
 .array-add span, .array-remove span {
 	font-family: 'Exo 2', sans-serif;
 	font-size: 16px;
