@@ -38,6 +38,8 @@ type Options struct {
 	TrustedProxies []netip.Prefix
 	// Now is the clock for per-minute limits; nil means time.Now.
 	Now func() time.Time
+	// WebDir holds the frontend's files, served at /.
+	WebDir string
 }
 
 // Server is the runner's HTTP handler.

@@ -50,6 +50,15 @@ jobs:
       - name: Unit tests
         run: go test -count=1 ./...
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Frontend scripts
+        run: |
+          for f in web/*.js; do node --check "$f"; done
+          node --test test/ui/codec.test.js
+
   image:
     name: Image and integration tests
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -85,6 +94,21 @@ jobs:
 
       - name: Integration tests
         run: go test -tags integration -count=1 -v ./test/integration/...
+
+      - uses: actions/setup-node@v4
+        if: ${{ !cancelled() }}
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: test/ui/package-lock.json
+
+      - name: UI tests
+        if: ${{ !cancelled() }}
+        working-directory: test/ui
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npx playwright test
 
       - name: Container logs
         if: always()
