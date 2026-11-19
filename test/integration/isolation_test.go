@@ -16,11 +16,12 @@ import (
 // limits_test.go.
 const defaultPids = 64
 
-// processCountCode spawns n background processes from ⎕SH, then prints how
-// many processes the run can see. Counting uses only shell builtins, so it
-// still works once no more processes can be created.
+// processCountCode has a child of ⎕SH fork up to n sleeping processes, then
+// print how many processes the run can see. Perl stops at the first failed
+// fork and counts without creating a process; dash, the shell ⎕SH runs,
+// exits when a fork fails.
 func processCountCode(n int) string {
-	return fmt.Sprintf(`{⎕←⍵}¨⎕SH'for i in $(seq %d); do sleep 30 >/dev/null 2>&1 & done 2>/dev/null; n=0; for p in /proc/[0-9]*; do n=$((n+1)); done; echo $n'`+"\n", n)
+	return fmt.Sprintf(`{⎕←⍵}¨⎕SH'perl -e ''for (1..%d) { defined(my $pid = fork) or last; if (!$pid) { close STDOUT; close STDERR; sleep 30; exit } } opendir my $d, "/proc"; print scalar(grep { /^\d+$/ } readdir $d), "\n"'''`+"\n", n)
 }
 
 // childAllocationCode has a child of ⎕SH buffer bytes bytes in memory and
@@ -36,13 +37,35 @@ func firstLineInt(t *testing.T, r runResponse) int64 {
 	t.Helper()
 	l := lines(r.Stdout)
 	if len(l) == 0 {
-		t.Fatalf("no output; stderr %q", r.Stderr)
+		t.Fatalf("no output; %s", describe(r))
 	}
 	n, err := strconv.ParseInt(strings.TrimSpace(l[0]), 10, 64)
 	if err != nil {
-		t.Fatalf("first output line %q is not an integer; stderr %q", l[0], r.Stderr)
+		t.Fatalf("first output line %q is not an integer; %s", l[0], describe(r))
 	}
 	return n
+}
+
+// describe summarises a run for failure messages.
+func describe(r runResponse) string {
+	exit, signal := "null", "null"
+	if r.ExitCode != nil {
+		exit = strconv.Itoa(*r.ExitCode)
+	}
+	if r.Signal != nil {
+		signal = *r.Signal
+	}
+	return fmt.Sprintf("exit %s, signal %s, timedOut %v, wall %d ms, stdout %q, stderr %q",
+		exit, signal, r.TimedOut, r.WallTimeMs, r.Stdout, r.Stderr)
+}
+
+// assertRunLines is assertLines on a run's stdout, reporting the whole run
+// when the lines differ.
+func assertRunLines(t *testing.T, r runResponse, want ...string) {
+	t.Helper()
+	if got := lines(r.Stdout); !slices.Equal(got, want) {
+		t.Errorf("output lines %q, want %q; %s", got, want, describe(r))
+	}
 }
 
 func TestRunCannotOpenAnOutboundTCPConnection(t *testing.T) {
@@ -59,7 +82,7 @@ func TestRunCannotOpenAnOutboundTCPConnection(t *testing.T) {
 func TestRunCannotWriteOutsideTmpAndHome(t *testing.T) {
 	r := run(t, "{⎕←⍵}¨{0::'failed' ⋄ _←(⊂'a')⎕NPUT ⍵ ⋄ 'written'}¨'/marker' '/usr/marker' '/etc/marker' '/opt/mdyalog/marker' '/job/marker'\n", "")
 
-	assertLines(t, r.Stdout, "failed", "failed", "failed", "failed", "failed")
+	assertRunLines(t, r, "failed", "failed", "failed", "failed", "failed")
 }
 
 func TestRunCannotWriteMoreThanTheTmpfsLimitToTmpOrHome(t *testing.T) {
@@ -69,7 +92,7 @@ write←{0::'failed' ⋄ _←(⊂10e6⍴'x')⎕NPUT ⍵ ⋄ 'written'}
 {⎕←⍵}¨write¨'/tmp/a' '/tmp/b' (home,'/a') (home,'/b')
 `, "")
 
-	assertLines(t, r.Stdout, "written", "failed", "written", "failed")
+	assertRunLines(t, r, "written", "failed", "written", "failed")
 }
 
 func TestFilesDoNotSurviveFromOneRunToTheNext(t *testing.T) {
@@ -78,11 +101,11 @@ _←(⊂'a')⎕NPUT'/tmp/marker'
 _←(⊂'a')⎕NPUT home,'/marker'
 ⎕←⎕NEXISTS'/tmp/marker' (home,'/marker')
 `, "")
-	assertLines(t, first.Stdout, "1 1")
+	assertRunLines(t, first, "1 1")
 
 	second := run(t, "home←2⎕NQ#'GetEnvironment' 'HOME'\n⎕←⎕NEXISTS'/tmp/marker' (home,'/marker')\n", "")
 
-	assertLines(t, second.Stdout, "0 0")
+	assertRunLines(t, second, "0 0")
 }
 
 func TestAllocatingPastMAXWSGivesWSFULL(t *testing.T) {
@@ -99,9 +122,9 @@ func TestAllocatingPastMAXWSGivesWSFULL(t *testing.T) {
 func TestAChildPastTheMemoryLimitIsKilledAndTheServiceKeepsServing(t *testing.T) {
 	r := run(t, childAllocationCode(1_000_000_000), "")
 
-	assertLines(t, r.Stdout, "status 137")
+	assertRunLines(t, r, "status 137")
 	after := run(t, "⎕←'still serving'\n", "")
-	assertLines(t, after.Stdout, "still serving")
+	assertRunLines(t, after, "still serving")
 }
 
 func TestProcessCreationStopsAtTheProcessLimit(t *testing.T) {
@@ -141,7 +164,7 @@ errno←⊃memcpy 1 __errno_location 4
 ⎕←result errno
 `, "")
 
-	assertLines(t, r.Stdout, "¯1 1")
+	assertRunLines(t, r, "¯1 1")
 }
 
 func TestRunIsUnprivilegedAndSeesOnlyItsOwnProcesses(t *testing.T) {
@@ -193,7 +216,7 @@ func TestConcurrentRunsCannotSeeEachOthersFilesOrProcesses(t *testing.T) {
 ⎕←⊃⎕SH'cat /proc/[0-9]*/cmdline 2>/dev/null | tr "\0" " " | grep -c "5[.]000123" || true'
 `, "")
 
-	assertLines(t, second.Stdout, "0 0", "0")
+	assertRunLines(t, second, "0 0", "0")
 	if err := <-firstDone; err != nil {
 		t.Errorf("first run: %v", err)
 	}
@@ -214,7 +237,7 @@ func TestSandboxMemorySetsTheMemoryLimit(t *testing.T) {
 
 	r := runAt(t, url, childAllocationCode(200_000_000), "")
 
-	assertLines(t, r.Stdout, "status 137")
+	assertRunLines(t, r, "status 137")
 }
 
 func TestSandboxMemorySetsTheWorkspaceToHalfTheMemoryLimit(t *testing.T) {

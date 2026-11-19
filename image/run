@@ -12,4 +12,6 @@ if [[ -s $script && -n $(tail -c 1 "$script") ]]; then
   echo >> "$script"
 fi
 
-exec dyalogscript "$script" "$@"
+# Dyalog applies MAXWS given on dyalogscript's command line, before the
+# script; in script mode the environment variable alone has no effect.
+exec dyalogscript ${MAXWS:+"MAXWS=$MAXWS"} "$script" "$@"
