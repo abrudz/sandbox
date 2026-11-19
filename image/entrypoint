@@ -15,10 +15,13 @@ set -euo pipefail
 cgroup=/sys/fs/cgroup
 
 mkdir -p "$cgroup/init"
-# A process listed in cgroup.procs can exit before it is moved; skip it.
-while read -r pid; do
+# cgroup.procs shrinks as processes leave it, and reading it while moving
+# them skips entries, so the whole list is read first. A process that
+# exits before it is moved is skipped.
+pids=$(< "$cgroup/cgroup.procs")
+for pid in $pids; do
   echo "$pid" > "$cgroup/init/cgroup.procs" 2> /dev/null || true
-done < "$cgroup/cgroup.procs"
+done
 echo "+cpu +memory +pids" > "$cgroup/cgroup.subtree_control"
 
 exec /usr/local/bin/runner-api "$@"

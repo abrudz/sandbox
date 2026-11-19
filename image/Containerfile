@@ -37,8 +37,10 @@ FROM docker.io/dyalog/dyalog:latest
 # need root inside the container. Runs execute as an unprivileged uid.
 USER root
 COPY --from=nsjail /out/runtime-packages /tmp/nsjail-runtime-packages
+# tini is PID 1 so that a jailed process orphaned by killing nsjail is
+# reaped instead of staying a zombie under runner-api.
 RUN apt-get update \
- && xargs -a /tmp/nsjail-runtime-packages apt-get install -y --no-install-recommends \
+ && xargs -a /tmp/nsjail-runtime-packages apt-get install -y --no-install-recommends tini \
  && rm -rf /var/lib/apt/lists/* /tmp/nsjail-runtime-packages
 COPY --from=nsjail /out/nsjail /usr/local/bin/nsjail
 RUN ! ldd /usr/local/bin/nsjail | grep 'not found'
@@ -54,4 +56,4 @@ RUN mkdir -p /usr/share/sandbox \
 # Dyalog's licence stays at /LICENSE, where the base image puts it.
 COPY THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 COPY LICENSE /usr/share/doc/sandbox/LICENSE
-ENTRYPOINT ["/usr/local/bin/entrypoint"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint"]

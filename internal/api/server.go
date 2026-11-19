@@ -72,6 +72,10 @@ func (s *server) run(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.opts.Executor.Run(r.Context(), job)
 	if err != nil {
+		if r.Context().Err() != nil {
+			// The client disconnected; the executor has stopped the run.
+			return
+		}
 		log.Printf("run failed: %v", err)
 		http.Error(w, "sandbox unavailable", http.StatusServiceUnavailable)
 		return

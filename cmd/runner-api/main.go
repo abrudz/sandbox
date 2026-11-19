@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/abrudz/sandbox/internal/api"
+	"github.com/abrudz/sandbox/internal/config"
 	"github.com/abrudz/sandbox/internal/sandbox"
 )
 
@@ -22,6 +23,10 @@ const (
 )
 
 func main() {
+	limits, err := config.FromEnv(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
 	version, err := os.ReadFile(versionFile)
 	if err != nil {
 		log.Fatalf("reading the Dyalog version: %v", err)
@@ -31,11 +36,13 @@ func main() {
 	}
 
 	executor := &sandbox.Nsjail{
-		Binary:  nsjailBinary,
-		Config:  nsjailConfig,
-		Command: jailCommand,
-		JobsDir: jobsDir,
-		Logf:    log.Printf,
+		Binary:      nsjailBinary,
+		Config:      nsjailConfig,
+		Command:     jailCommand,
+		JobsDir:     jobsDir,
+		Timeout:     limits.Timeout,
+		OutputLimit: limits.OutputLimit,
+		Logf:        log.Printf,
 	}
 	srv := &http.Server{
 		Addr: ":8080",
@@ -45,6 +52,7 @@ func main() {
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("runner-api listening on %s (Dyalog %s)", srv.Addr, strings.TrimSpace(string(version)))
+	log.Printf("runner-api listening on %s (Dyalog %s; timeout %v, output limit %d bytes per stream)",
+		srv.Addr, strings.TrimSpace(string(version)), limits.Timeout, limits.OutputLimit)
 	log.Fatal(srv.ListenAndServe())
 }

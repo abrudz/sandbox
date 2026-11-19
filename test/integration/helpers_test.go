@@ -44,9 +44,15 @@ type runResponse struct {
 	fields map[string]json.RawMessage
 }
 
-// run submits code, input and args to POST /api/v1/run and fails the test
-// unless the API answers 200 with a JSON body.
+// run submits code, input and args to POST /api/v1/run on the CI container
+// and fails the test unless the API answers 200 with a JSON body.
 func run(t *testing.T, code, input string, args ...string) runResponse {
+	t.Helper()
+	return runAt(t, env(t, "SANDBOX_URL"), code, input, args...)
+}
+
+// runAt is run against the container whose API is at baseURL.
+func runAt(t *testing.T, baseURL, code, input string, args ...string) runResponse {
 	t.Helper()
 	if args == nil {
 		args = []string{}
@@ -55,7 +61,7 @@ func run(t *testing.T, code, input string, args ...string) runResponse {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := request(t, http.MethodPost, "/api/v1/run", body)
+	data := requestAt(t, baseURL, http.MethodPost, "/api/v1/run", body)
 	var r runResponse
 	if err := json.Unmarshal(data, &r); err != nil {
 		t.Fatalf("POST /api/v1/run: response is not JSON: %v\n%s", err, data)
@@ -66,11 +72,17 @@ func run(t *testing.T, code, input string, args ...string) runResponse {
 	return r
 }
 
-// request sends a request to the running container and returns the body of
-// a 200 response; any other status fails the test.
+// request sends a request to the CI container and returns the body of a 200
+// response; any other status fails the test.
 func request(t *testing.T, method, path string, body []byte) []byte {
 	t.Helper()
-	req, err := http.NewRequest(method, env(t, "SANDBOX_URL")+path, bytes.NewReader(body))
+	return requestAt(t, env(t, "SANDBOX_URL"), method, path, body)
+}
+
+// requestAt is request against the container whose API is at baseURL.
+func requestAt(t *testing.T, baseURL, method, path string, body []byte) []byte {
+	t.Helper()
+	req, err := http.NewRequest(method, baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

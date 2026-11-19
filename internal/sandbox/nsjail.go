@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -19,6 +21,10 @@ type Nsjail struct {
 	Config  string // nsjail configuration; it must set log_fd: 3
 	Command string // program run inside the jail; receives the job's arguments
 	JobsDir string // parent of the per-run directories
+	// Timeout is the wall-clock limit of one run.
+	Timeout time.Duration
+	// OutputLimit is the number of bytes kept from each of stdout and stderr.
+	OutputLimit int
 	// Logf receives nsjail's log when nsjail cannot run a job.
 	Logf func(format string, args ...any)
 }
@@ -29,10 +35,17 @@ type Nsjail struct {
 var (
 	exitedLine     = regexp.MustCompile(`exited with status: (\d+)`)
 	terminatedLine = regexp.MustCompile(`terminated with signal: (\w+) \(\d+\)`)
+	timeLimitLine  = regexp.MustCompile(`run time >= time limit`)
 )
 
+// stopGrace is how long nsjail has to kill and reap the jail after SIGTERM
+// before it is killed itself. The jailed process then dies through its
+// parent-death signal, and the container's init reaps it.
+const stopGrace = time.Second
+
 // Run runs job inside nsjail. The code is visible in the jail, read-only,
-// as /job/code; the input is the jailed program's standard input.
+// as /job/code; the input is the jailed program's standard input. When ctx
+// is done before the run ends, Run stops the run and returns ctx's error.
 func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 	dir, err := os.MkdirTemp(n.JobsDir, "job-")
 	if err != nil {
@@ -53,12 +66,26 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	defer logR.Close()
 
-	args := append([]string{"--config", n.Config, "--bindmount_ro", dir + ":/job", "--", n.Command}, job.Args...)
-	cmd := exec.CommandContext(ctx, n.Binary, args...)
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	timer := time.AfterFunc(n.Timeout, stop)
+
+	args := []string{
+		"--config", n.Config,
+		"--bindmount_ro", dir + ":/job",
+		// nsjail counts whole seconds, so its own limit is only a backstop
+		// that never fires before the timer above.
+		"--time_limit", strconv.Itoa(int(math.Ceil(n.Timeout.Seconds())) + 2),
+		"--", n.Command,
+	}
+	cmd := exec.CommandContext(runCtx, n.Binary, append(args, job.Args...)...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = stopGrace
 	cmd.Stdin = bytes.NewReader(job.Input)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &capped{limit: n.OutputLimit}
+	stderr := &capped{limit: n.OutputLimit}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.ExtraFiles = []*os.File{logW} // descriptor 3 in nsjail
 
 	start := time.Now()
@@ -74,28 +101,68 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 	}()
 	waitErr := cmd.Wait()
 	wall := time.Since(start)
+	fired := !timer.Stop()
 	nsjailLog := <-logged
 
-	result := Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), WallTime: wall}
+	if !fired && ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
+
+	exited := exitedLine.FindSubmatch(nsjailLog)
+	terminated := terminatedLine.FindSubmatch(nsjailLog)
+	result := Result{
+		Stdout:          stdout.buf.Bytes(),
+		Stderr:          stderr.buf.Bytes(),
+		StdoutTruncated: stdout.truncated,
+		StderrTruncated: stderr.truncated,
+		// A program that exited by itself as the timer fired was not stopped.
+		TimedOut: timeLimitLine.Match(nsjailLog) || (fired && exited == nil),
+		WallTime: wall,
+	}
 	if ps := cmd.ProcessState; ps != nil {
 		// nsjail reaps the jailed process, so its usage includes the program's.
 		result.UserTime = ps.UserTime()
 		result.SysTime = ps.SystemTime()
 	}
-	if m := terminatedLine.FindSubmatch(nsjailLog); m != nil {
-		result.Signal = string(m[1])
+	switch {
+	case terminated != nil:
+		result.Signal = string(terminated[1])
 		return result, nil
-	}
-	if m := exitedLine.FindSubmatch(nsjailLog); m != nil {
-		code, err := strconv.Atoi(string(m[1]))
+	case exited != nil:
+		code, err := strconv.Atoi(string(exited[1]))
 		if err != nil {
-			return Result{}, fmt.Errorf("parsing exit status %q: %w", m[1], err)
+			return Result{}, fmt.Errorf("parsing exit status %q: %w", exited[1], err)
 		}
 		result.ExitCode = &code
+		return result, nil
+	case result.TimedOut:
+		// nsjail itself was killed after stopGrace, before logging the outcome.
 		return result, nil
 	}
 	if n.Logf != nil {
 		n.Logf("nsjail did not run the job (%v); its log:\n%s", waitErr, nsjailLog)
 	}
 	return Result{}, fmt.Errorf("nsjail did not run the job: %v", waitErr)
+}
+
+// capped keeps the first limit bytes written to it and discards the rest
+// while still accepting them, so a program never blocks on a full pipe.
+type capped struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	room := c.limit - c.buf.Len()
+	switch {
+	case room <= 0:
+		c.truncated = c.truncated || len(p) > 0
+	case len(p) > room:
+		c.buf.Write(p[:room])
+		c.truncated = true
+	default:
+		c.buf.Write(p)
+	}
+	return len(p), nil
 }
