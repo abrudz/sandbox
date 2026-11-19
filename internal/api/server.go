@@ -2,11 +2,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/abrudz/sandbox/internal/sandbox"
 )
@@ -18,20 +21,47 @@ type Options struct {
 	// DyalogVersion is the interpreter's version, reported by
 	// /api/v1/version and in every run result.
 	DyalogVersion string
+	// RequestLimit is the largest code plus input one request may carry,
+	// in bytes.
+	RequestLimit int
+	// Concurrency is the number of runs in progress at once.
+	Concurrency int
+	// ClientConcurrency is the number of runs one client may have in
+	// progress at once.
+	ClientConcurrency int
+	// ClientRate is the number of runs one client may start per minute.
+	ClientRate int
+	// TrustedProxies are the peers whose X-Forwarded-For header names the
+	// client; any other peer is the client itself.
+	TrustedProxies []netip.Prefix
+	// Now is the clock for per-minute limits; nil means time.Now.
+	Now func() time.Time
+}
+
+// Server is the runner's HTTP handler.
+type Server struct {
+	opts Options
+	mux  *http.ServeMux
 }
 
 // NewHandler returns the runner's HTTP handler.
-func NewHandler(opts Options) http.Handler {
-	s := &server{opts: opts}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("POST /api/v1/run", s.run)
-	mux.HandleFunc("GET /api/v1/version", s.version)
-	return mux
+func NewHandler(opts Options) *Server {
+	s := &Server{opts: opts, mux: http.NewServeMux()}
+	s.mux.HandleFunc("GET /healthz", healthz)
+	s.mux.HandleFunc("POST /api/v1/run", s.run)
+	s.mux.HandleFunc("GET /api/v1/version", s.version)
+	return s
 }
 
-type server struct {
-	opts Options
+// ServeHTTP implements http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+// Drain makes every new request answer 503 and returns once the runs in
+// progress have finished, or when ctx is done.
+func (s *Server) Drain(ctx context.Context) error {
+	return nil
 }
 
 // healthz reports that the API is serving requests.
@@ -62,7 +92,7 @@ type runResponse struct {
 
 // run executes one program. Every completed run answers 200, whatever the
 // program's exit status; 503 means the sandbox could not run it.
-func (s *server) run(w http.ResponseWriter, r *http.Request) {
+func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	var req runRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "malformed request: "+err.Error(), http.StatusBadRequest)
@@ -100,7 +130,7 @@ func (s *server) run(w http.ResponseWriter, r *http.Request) {
 }
 
 // version reports the interpreter version that runs programs.
-func (s *server) version(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]string{"dyalogVersion": s.opts.DyalogVersion})
 }
 

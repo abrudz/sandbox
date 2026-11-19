@@ -152,6 +152,11 @@ func docker(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	return dockerContext(ctx, args...)
+}
+
+// dockerContext is docker with the caller's deadline.
+func dockerContext(ctx context.Context, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	return string(out), err
 }

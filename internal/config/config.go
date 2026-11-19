@@ -1,14 +1,15 @@
-// Package config reads runner-api's per-run limits from the environment.
+// Package config reads runner-api's limits from the environment.
 package config
 
 import (
 	"fmt"
 	"math"
+	"net/netip"
 	"strconv"
 	"time"
 )
 
-// Limits are the per-run limits runner-api enforces.
+// Limits are the limits runner-api enforces, per run and per request.
 type Limits struct {
 	// Timeout is the wall-clock limit of one run (SANDBOX_TIMEOUT, a Go
 	// duration such as "10s").
@@ -25,6 +26,22 @@ type Limits struct {
 	// Pids is the number of processes and threads one run may have
 	// (SANDBOX_PIDS).
 	Pids int
+	// RequestLimit is the largest code plus input one request may carry, in
+	// bytes (SANDBOX_REQUEST_LIMIT).
+	RequestLimit int
+	// Concurrency is the number of runs in progress at once across all
+	// clients (SANDBOX_CONCURRENCY).
+	Concurrency int
+	// ClientConcurrency is the number of runs one client may have in
+	// progress at once (SANDBOX_CLIENT_CONCURRENCY).
+	ClientConcurrency int
+	// ClientRate is the number of runs one client may start per minute
+	// (SANDBOX_CLIENT_RATE).
+	ClientRate int
+	// TrustedProxies are the peers whose X-Forwarded-For header identifies
+	// the client (SANDBOX_TRUSTED_PROXIES: comma-separated addresses or
+	// networks). Without them, the peer address is the client.
+	TrustedProxies []netip.Prefix
 }
 
 // Workspace is the interpreter's maximum workspace (MAXWS) in bytes: half
