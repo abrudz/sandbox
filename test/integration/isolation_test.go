@@ -130,8 +130,9 @@ func TestTwoBusyProcessesShareOneCPU(t *testing.T) {
 }
 
 func TestBlockedSystemCallThroughQuadNAFailsWithEPERM(t *testing.T) {
-	// 268435456 is CLONE_NEWUSER: creating a user namespace needs no
-	// capability, so only the seccomp policy can refuse it.
+	// 268435456 is CLONE_NEWUSER. The kernel refuses it in a multithreaded
+	// process such as the interpreter with EINVAL; a seccomp filter runs
+	// before the kernel sees the call, so EPERM comes only from the policy.
 	r := run(t, `⎕NA'I4 libc.so.6|unshare I4'
 ⎕NA'P libc.so.6|__errno_location'
 ⎕NA'libc.so.6|memcpy >I4[1] P P'
