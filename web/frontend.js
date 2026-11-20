@@ -119,17 +119,21 @@ function showResult(result) {
 
 // The Run button shows the logo, the Dyalog D with a play triangle. While a
 // run is in progress the D turns into a spinning cogwheel, as TIO's ring
-// did, and back into the D afterwards. Both outlines are described around
-// the centre of the logo's 224 by 247 box: for each of logoDirections
-// directions, the distance to the inner and to the outer edge. The D's
-// distances are measured on its path. On the D's open left side the two
-// edges coincide, so that gap closes as the D turns into the cogwheel's
-// ring. While the outline is not the D's, #run-morph draws it in place of
-// #run-d, so the button at rest is exactly the logo.
+// did, and back into the D afterwards. Seen from the centre of the logo's
+// 224 by 247 box, the D is a band that runs from the end of its top-left
+// stub, round the bowl, to the end of its bottom bar, leaving a gap on the
+// left. The band is described by the distance to its inner and outer edge
+// at bandSamples points along it. During the morph the band lengthens, its
+// two ends moving towards each other until they meet in the middle of the
+// gap, while its edges become the cogwheel's ring and teeth. While the
+// outline is not the D's, #run-morph draws it in place of #run-d, so the
+// button at rest is exactly the logo.
 var logoCentreX = 112;
 var logoCentreY = 123.5;
-var logoDirections = 360;
-var logoEdges;
+var bandSamples = 360;
+var bandStart;
+var bandSpan;
+var bandEdges;
 var gearTeeth = 8;
 var gearTip = 110;
 var gearBody = 86;
@@ -148,40 +152,69 @@ var gearAngle = 0;
 var morphFrame;
 var morphTime;
 
-// measureLogo samples the D's outline as a polygon and measures, in each
-// direction from the centre, the nearest and farthest crossing of it.
+// crossings returns the nearest and farthest distance at which a ray from
+// the centre in the direction angle crosses the polygon, or null if it
+// crosses nothing.
+function crossings(polygon, angle) {
+	var dx = Math.cos(angle), dy = Math.sin(angle);
+	var near = Infinity, far = 0;
+	for (var j = 0; j < polygon.length; j++) {
+		var p = polygon[j], q = polygon[(j + 1) % polygon.length];
+		var ex = q[0] - p[0], ey = q[1] - p[1];
+		var denominator = dx * ey - dy * ex;
+		if (denominator == 0)
+			continue;
+		var t = (p[0] * ey - p[1] * ex) / denominator;
+		var s = (p[0] * dy - p[1] * dx) / denominator;
+		if (t > 0 && s >= 0 && s < 1) {
+			near = Math.min(near, t);
+			far = Math.max(far, t);
+		}
+	}
+	return far > 0 ? [near, far] : null;
+}
+
+// measureLogo finds the D's gap, the directions in which a ray from the
+// centre crosses nothing, and measures the band between its ends.
 function measureLogo() {
 	var path = $("#run-d");
 	var length = path.getTotalLength();
-	var points = [];
+	var polygon = [];
 	for (var i = 0; i < 720; i++) {
 		var point = path.getPointAtLength(length * i / 720);
-		points.push([point.x - logoCentreX, point.y - logoCentreY]);
+		polygon.push([point.x - logoCentreX, point.y - logoCentreY]);
 	}
-	logoEdges = [];
-	for (var k = 0; k < logoDirections; k++) {
-		var angle = 2 * Math.PI * k / logoDirections;
-		var dx = Math.cos(angle), dy = Math.sin(angle);
-		var near = Infinity, far = 0;
-		for (var j = 0; j < points.length; j++) {
-			var p = points[j], q = points[(j + 1) % points.length];
-			var ex = q[0] - p[0], ey = q[1] - p[1];
-			var denominator = dx * ey - dy * ex;
-			if (denominator == 0)
-				continue;
-			var t = (p[0] * ey - p[1] * ex) / denominator;
-			var s = (p[0] * dy - p[1] * dx) / denominator;
-			if (t > 0 && s >= 0 && s < 1) {
-				near = Math.min(near, t);
-				far = Math.max(far, t);
-			}
+	var step = 2 * Math.PI / 360;
+	var k = 0;
+	while (crossings(polygon, k * step) === null)
+		k++;
+	while (crossings(polygon, k * step) !== null)
+		k++;
+	// k * step is in the gap and the direction before it crosses the D.
+	// Each end of the band is found by bisection between such a pair.
+	function end(crossing, open) {
+		for (var i = 0; i < 40; i++) {
+			var middle = (crossing + open) / 2;
+			if (crossings(polygon, middle) === null)
+				open = middle;
+			else
+				crossing = middle;
 		}
-		// A direction through the open left side meets no edge; both
-		// edges are then on the line the D's left side lies on.
-		if (far == 0)
-			near = far = -logoCentreX / dx;
-		logoEdges.push([near, far]);
+		return crossing;
 	}
+	var gapStart = end((k - 1) * step, k * step);
+	while (crossings(polygon, k * step) === null)
+		k++;
+	var gapEnd = end(k * step, (k - 1) * step);
+	bandStart = gapEnd;
+	bandSpan = gapStart + 2 * Math.PI - gapEnd;
+	// Rounding can put a sample at either end just into the gap; it then
+	// takes its neighbour's edges.
+	bandEdges = [];
+	for (var j = 0; j < bandSamples; j++)
+		bandEdges.push(crossings(polygon, bandStart + bandSpan * j / (bandSamples - 1)) || bandEdges[j - 1]);
+	if (!bandEdges[0])
+		bandEdges[0] = bandEdges[1];
 }
 
 // gearRadius returns the cogwheel's outer radius in the direction angle,
@@ -211,17 +244,26 @@ function drawLogo() {
 		play.removeAttribute("transform");
 		return;
 	}
+	// The band's ends advance into the gap, half of it each.
+	var gap = 2 * Math.PI - bandSpan;
+	var start = bandStart - t * gap / 2, span = bandSpan + t * gap;
+	// Closed, the band's last sample is its first.
+	var closed = t == 1;
 	var outer = [], inner = [];
-	for (var k = 0; k < logoDirections; k++) {
-		var angle = 2 * Math.PI * k / logoDirections;
-		var edges = logoEdges[k];
+	for (var k = 0; k < (closed ? bandSamples - 1 : bandSamples); k++) {
+		var angle = start + span * k / (bandSamples - 1);
+		var edges = bandEdges[k];
 		// The teeth grow more slowly than the ring forms, so they rise out
 		// of a ring rather than out of the D's outline.
 		outer.push(point(edges[1] + t * (gearBody - edges[1]) + t * t * (gearRadius(angle - gearAngle) - gearBody), angle));
 		inner.push(point(edges[0] + t * (gearHole - edges[0]), angle));
 	}
-	// The inner edge runs the other way round, which makes it a hole.
-	morph.setAttribute("d", "M" + outer.join("L") + "Z M" + inner.reverse().join("L") + "Z");
+	// Open, the outline runs along the outer edge and back along the inner
+	// one; closed, the inner edge is a hole in the outer one.
+	inner.reverse();
+	morph.setAttribute("d", closed ?
+		"M" + outer.join("L") + "Z M" + inner.join("L") + "Z" :
+		"M" + outer.join("L") + "L" + inner.join("L") + "Z");
 	d.style.display = "none";
 	morph.style.display = "";
 	var scale = 1 - t * (1 - playShrink);
@@ -244,7 +286,7 @@ function animateLogo(now) {
 // immediate and the cogwheel stands still.
 function setRunning(running) {
 	$("#run").classList.toggle("running", running);
-	if (!logoEdges)
+	if (!bandEdges)
 		measureLogo();
 	morphTarget = running ? 1 : 0;
 	if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
