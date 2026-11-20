@@ -32,11 +32,13 @@ jobs:
         run: |
           go vet ./...
           go vet -tags integration ./...
+          go vet -tags deploy ./...
 
       - name: staticcheck
         run: |
           go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
           go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 -tags integration ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 -tags deploy ./...
 
       - name: shellcheck
         run: |
@@ -65,3 +67,33 @@ jobs:
     name: Image and integration tests
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     uses: ./.github/workflows/image.yml
+
+  deploy:
+    name: Deployment
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    # The runner stands in for the public instance's VM: deploy/setup-host
+    # provisions it, with Caddy serving plain HTTP on localhost and the
+    # image coming from a local registry the update test can publish to.
+    env:
+      SITE_ADDRESS: http://localhost
+      SANDBOX_IMAGE: localhost:5000/sandbox:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Publish the current image to a local registry
+        run: |
+          docker run -d --name registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2
+          docker pull ghcr.io/abrudz/sandbox:latest
+          docker tag ghcr.io/abrudz/sandbox:latest "$SANDBOX_IMAGE"
+          docker push "$SANDBOX_IMAGE"
+
+      - name: Provision this runner as the public instance
+        run: sudo --preserve-env=SITE_ADDRESS,SANDBOX_IMAGE deploy/setup-host
+
+      - name: Deployment tests
+        if: ${{ !cancelled() }}
+        run: sudo --preserve-env=SITE_ADDRESS,SANDBOX_IMAGE "$(command -v go)" test -tags deploy -count=1 -v ./test/deploy/...
