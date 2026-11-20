@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# setup-host
+#
+# Turns a fresh Ubuntu 24.04 host into the public instance, or brings a
+# provisioned one back in line with deploy/. Run it as root from a checkout
+# of this repository:
+#
+#   sudo deploy/setup-host
+#
+# Settings come from the environment:
+#
+#   SITE_ADDRESS   Caddy's site address, default dyalog.run. For a domain,
+#                  its DNS must point to this host for Caddy to obtain the
+#                  certificate.
+#   SANDBOX_IMAGE  the image to run, default ghcr.io/abrudz/sandbox:latest
+#
+# It installs Docker Engine and compose (unless present), ufw and unattended
+# upgrades; opens SSH, HTTP and HTTPS only; installs the instance in
+# /opt/sandbox and the daily update timer; and starts the instance. Each
+# change is reported as it is made, and a run that finds nothing to change
+# reports "No changes".
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "$0: run as root" >&2
+	exit 1
+fi
+
+here=$(cd "$(dirname "$0")" && pwd)
+site_address=${SITE_ADDRESS:-dyalog.run}
+sandbox_image=${SANDBOX_IMAGE:-ghcr.io/abrudz/sandbox:latest}
+dir=/opt/sandbox
+compose=(docker compose -f "$dir/compose.yaml")
+changes=0
+
+changed() {
+	echo "Changed: $*"
+	changes=$((changes + 1))
+}
+
+# install_packages PACKAGE... installs the packages not yet installed.
+install_packages() {
+	local missing=() p
+	for p in "$@"; do
+		if [ "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)" != "install ok installed" ]; then
+			missing+=("$p")
+		fi
+	done
+	if [ ${#missing[@]} -eq 0 ]; then
+		return
+	fi
+	apt-get update -q
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "${missing[@]}"
+	changed "installed ${missing[*]}"
+}
+
+# install_file SOURCE DEST MODE copies SOURCE to DEST unless DEST already
+# has its content and mode, and sets copied to whether it copied.
+install_file() {
+	local src=$1 dest=$2 mode=$3
+	copied=false
+	if [ -f "$dest" ] && cmp -s "$src" "$dest" && [ "$(stat -c %a "$dest")" = "$mode" ]; then
+		return
+	fi
+	install -D -m "$mode" "$src" "$dest"
+	copied=true
+	changed "$dest"
+}
+
+# Docker Engine and compose: Ubuntu's packages, which unattended upgrades
+# keep patched, unless the host already has both.
+if ! docker compose version >/dev/null 2>&1; then
+	install_packages docker.io docker-compose-v2
+fi
+if ! systemctl is-enabled --quiet docker.service; then
+	systemctl enable docker.service
+	changed "enabled docker.service"
+fi
+if ! systemctl is-active --quiet docker.service; then
+	systemctl start docker.service
+	changed "started docker.service"
+fi
+
+install_packages ufw unattended-upgrades
+
+# Unattended upgrades, with a reboot when an upgrade needs one.
+install_file "$here/unattended-upgrades.conf" /etc/apt/apt.conf.d/60sandbox-unattended-upgrades 644
+
+# The firewall: the rules come first, so that enabling it never cuts off
+# SSH. 443/udp carries HTTP/3.
+for rule in 22/tcp 80/tcp 443/tcp 443/udp; do
+	result=$(ufw allow "$rule")
+	if grep -qv '^Skipping' <<<"$result"; then
+		changed "allowed $rule through the firewall"
+	fi
+done
+if ! grep -qx 'DEFAULT_INPUT_POLICY="DROP"' /etc/default/ufw; then
+	ufw default deny incoming
+	changed "set the firewall to deny incoming connections by default"
+fi
+if [ "$(ufw status | head -n 1)" != "Status: active" ]; then
+	ufw --force enable
+	changed "enabled the firewall"
+fi
+
+# The instance's files.
+env_file=$(mktemp)
+trap 'rm -f "$env_file"' EXIT
+printf 'SITE_ADDRESS=%s\nSANDBOX_IMAGE=%s\n' "$site_address" "$sandbox_image" >"$env_file"
+install_file "$env_file" "$dir/.env" 644
+install_file "$here/compose.yaml" "$dir/compose.yaml" 644
+install_file "$here/Caddyfile" "$dir/Caddyfile" 644
+caddyfile_changed=$copied
+
+# The daily update.
+units_changed=false
+for unit in sandbox-update.service sandbox-update.timer; do
+	install_file "$here/$unit" "/etc/systemd/system/$unit" 644
+	if $copied; then
+		units_changed=true
+	fi
+done
+if $units_changed; then
+	systemctl daemon-reload
+fi
+if ! systemctl is-enabled --quiet sandbox-update.timer; then
+	systemctl enable sandbox-update.timer
+	changed "enabled sandbox-update.timer"
+fi
+if ! systemctl is-active --quiet sandbox-update.timer; then
+	systemctl start sandbox-update.timer
+	changed "started sandbox-update.timer"
+elif $units_changed; then
+	systemctl restart sandbox-update.timer
+fi
+
+# The instance. Compose replaces only the containers whose configuration or
+# image has changed; Caddy reads a changed Caddyfile on a restart.
+before=$("${compose[@]}" ps -q | sort)
+"${compose[@]}" up -d --remove-orphans
+after=$("${compose[@]}" ps -q | sort)
+if [ "$before" != "$after" ]; then
+	changed "started or replaced the instance's containers"
+fi
+caddy=$("${compose[@]}" ps -q caddy)
+if $caddyfile_changed && [ -n "$caddy" ] && grep -qx "$caddy" <<<"$before"; then
+	"${compose[@]}" restart caddy
+	changed "restarted Caddy for the new Caddyfile"
+fi
+
+if [ "$changes" -eq 0 ]; then
+	echo "No changes"
+else
+	echo "$changes changes"
+fi

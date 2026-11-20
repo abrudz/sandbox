@@ -1,0 +1,16 @@
+[Unit]
+Description=Update the sandbox to the latest published image
+Documentation=https://github.com/abrudz/sandbox
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sandbox
+# Replacing a container waits up to its stop grace period for runs in
+# progress to finish.
+TimeoutStartSec=15min
+ExecStart=/usr/bin/docker compose pull --quiet
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStart=/usr/bin/docker image prune -f
