@@ -167,8 +167,10 @@ func TestUpdateBringsInANewlyPublishedImageWithoutFailingARunInProgress(t *testi
 	oldID := command(t, "docker", "inspect", "-f", "{{.Image}}", sandboxContainer(t))
 	// Publish a new image to the instance's tag, then point the local tag
 	// back at the running image, so only a pull can bring the new one in.
+	// BuildKit resolves FROM by name, so the running image gets a local tag.
+	command(t, "docker", "tag", oldID, "sandbox-current")
 	build := exec.Command("docker", "build", "--label", fmt.Sprintf("test.update=%d", time.Now().UnixNano()), "-t", "sandbox-next", "-")
-	build.Stdin = strings.NewReader("FROM " + oldID + "\n")
+	build.Stdin = strings.NewReader("FROM sandbox-current\n")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building the new image: %v\n%s", err, out)
 	}

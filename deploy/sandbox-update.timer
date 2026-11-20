@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily update of the sandbox
+Documentation=https://github.com/abrudz/sandbox
+
+[Timer]
+# After the publish workflow's daily run at 04:23 UTC.
+OnCalendar=*-*-* 05:00:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

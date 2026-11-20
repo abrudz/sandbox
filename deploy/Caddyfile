@@ -1,0 +1,7 @@
+# SITE_ADDRESS comes from the compose environment. For a domain such as
+# dyalog.run, whose DNS points to this host, Caddy obtains and renews the
+# certificate and redirects HTTP to HTTPS.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}

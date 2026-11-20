@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# smoke URL
+#
+# Checks a running instance at URL, such as https://dyalog.run or
+# http://localhost:8000, and prints one line per check, PASS or FAIL with
+# the reason:
+#
+#   page     GET / serves the page titled dyalog.run
+#   hello    a program prints Hello, World! and exits 0
+#   timeout  a program that waits past the time limit is killed there
+#   network  a program cannot connect to an outside address
+#
+# Exits 1 when any check fails and 2 on wrong usage. Needs curl and jq.
+set -uo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: $0 URL" >&2
+	exit 2
+fi
+url=${1%/}
+failed=0
+
+pass() { echo "PASS $1"; }
+fail() {
+	echo "FAIL $1: $2"
+	failed=1
+}
+
+# run CODE prints the run API's JSON answer for CODE. It fails, with curl's
+# message, when the request fails or the answer is not 200.
+run() {
+	local body
+	body=$(jq -cn --arg code "$1" '{code: $code, input: "", args: []}')
+	curl -sS --fail-with-body --max-time 60 -H 'Content-Type: application/json' \
+		--data-binary "$body" "$url/api/v1/run" 2>&1
+}
+
+# field ANSWER FILTER applies a jq filter to a run's answer, failing when the
+# answer is not JSON.
+field() { jq -er "$2" <<<"$1" 2>/dev/null; }
+
+check_page() {
+	local page
+	if ! page=$(curl -sS --fail --max-time 30 "$url/" 2>&1); then
+		fail page "GET /: $page"
+	elif [[ $page != *"<title>dyalog.run</title>"* ]]; then
+		fail page "GET / does not serve the page titled dyalog.run"
+	else
+		pass page
+	fi
+}
+
+check_hello() {
+	local answer stdout exit_code
+	if ! answer=$(run "⎕←'Hello, World!'"); then
+		fail hello "$answer"
+		return
+	fi
+	stdout=$(field "$answer" '.stdout') || { fail hello "the answer is not JSON: $answer"; return; }
+	exit_code=$(field "$answer" '.exitCode')
+	if [ "${stdout//$'\r'/}" = "Hello, World!" ] && [ "$exit_code" = 0 ]; then
+		pass hello
+	else
+		fail hello "stdout $(jq -c .stdout <<<"$answer"), exit code $exit_code"
+	fi
+}
+
+check_timeout() {
+	local answer timed_out stdout
+	if ! answer=$(run $'⎕DL 60\n⎕←\'still running\''); then
+		fail timeout "$answer"
+		return
+	fi
+	timed_out=$(field "$answer" '.timedOut') || { fail timeout "the answer is not JSON: $answer"; return; }
+	stdout=$(field "$answer" '.stdout')
+	if [ "$timed_out" = true ] && [[ $stdout != *"still running"* ]]; then
+		pass timeout
+	else
+		fail timeout "timedOut $timed_out, stdout $(jq -c .stdout <<<"$answer")"
+	fi
+}
+
+check_network() {
+	local answer stdout status
+	# The program reports the shell's status after trying to connect.
+	if ! answer=$(run "{⎕←⍵}¨⎕SH'bash -c ''exec 3<>/dev/tcp/1.1.1.1/80'' 2>&1; echo \"exit \$?\"'"); then
+		fail network "$answer"
+		return
+	fi
+	stdout=$(field "$answer" '.stdout') || { fail network "the answer is not JSON: $answer"; return; }
+	status=$(tr '\r' '\n' <<<"$stdout" | sed -n 's/^exit \([0-9]*\)$/\1/p' | tail -n 1)
+	if [ -n "$status" ] && [ "$status" != 0 ]; then
+		pass network
+	else
+		fail network "the connection did not fail: stdout $(jq -c .stdout <<<"$answer")"
+	fi
+}
+
+check_page
+check_hello
+check_timeout
+check_network
+exit "$failed"
