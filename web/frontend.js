@@ -7,8 +7,8 @@ var defaultLanguage = "apl-dyalog";
 var languageId;
 var languages;
 var languagesURL = "/languages.json";
-var ms = window.MSInputMethodContext !== undefined;
 var navHeight = 48;
+var runOnLoad = true;
 var rEscapees = /[\x00-\x09\x0b-\x1f\x7f-\x9f&<>]| $/gm;
 var rNewLine = /^/gm;
 var rLineOfSpaces = /^\s+$/m;
@@ -117,6 +117,190 @@ function showResult(result) {
 	resize($("#debug"));
 }
 
+// The Run button shows the logo, the Dyalog D with a play triangle. While a
+// run is in progress the D turns into a spinning cogwheel, as TIO's ring
+// did, and back into the D afterwards. Seen from the centre of the logo's
+// 224 by 247 box, the D is a band that runs from the end of its top-left
+// stub, round the bowl, to the end of its bottom bar, leaving a gap on the
+// left. The band is described by the distance to its inner and outer edge
+// at bandSamples points along it. During the morph the band lengthens, its
+// two ends moving towards each other until they meet in the middle of the
+// gap, while its edges become the cogwheel's ring and teeth. While the
+// outline is not the D's, #run-morph draws it in place of #run-d, so the
+// button at rest is exactly the logo.
+var logoCentreX = 112;
+var logoCentreY = 123.5;
+var bandSamples = 360;
+var bandStart;
+var bandSpan;
+var bandEdges;
+var gearTeeth = 8;
+var gearTip = 110;
+var gearBody = 86;
+var gearHole = 62;
+var gearToothTip = Math.PI / 20;
+var gearToothBase = 7 * Math.PI / 90;
+var gearTurnMs = 8000;
+var morphMs = 800;
+// The triangle's centre in the D, and how far it shrinks to fit the hole.
+var playCentreX = 96.6;
+var playCentreY = 123;
+var playShrink = 0.8;
+var morphTarget = 0;
+var morphProgress = 0;
+var gearAngle = 0;
+var morphFrame;
+var morphTime;
+
+// crossings returns the nearest and farthest distance at which a ray from
+// the centre in the direction angle crosses the polygon, or null if it
+// crosses nothing.
+function crossings(polygon, angle) {
+	var dx = Math.cos(angle), dy = Math.sin(angle);
+	var near = Infinity, far = 0;
+	for (var j = 0; j < polygon.length; j++) {
+		var p = polygon[j], q = polygon[(j + 1) % polygon.length];
+		var ex = q[0] - p[0], ey = q[1] - p[1];
+		var denominator = dx * ey - dy * ex;
+		if (denominator == 0)
+			continue;
+		var t = (p[0] * ey - p[1] * ex) / denominator;
+		var s = (p[0] * dy - p[1] * dx) / denominator;
+		if (t > 0 && s >= 0 && s < 1) {
+			near = Math.min(near, t);
+			far = Math.max(far, t);
+		}
+	}
+	return far > 0 ? [near, far] : null;
+}
+
+// measureLogo finds the D's gap, the directions in which a ray from the
+// centre crosses nothing, and measures the band between its ends.
+function measureLogo() {
+	var path = $("#run-d");
+	var length = path.getTotalLength();
+	var polygon = [];
+	for (var i = 0; i < 720; i++) {
+		var point = path.getPointAtLength(length * i / 720);
+		polygon.push([point.x - logoCentreX, point.y - logoCentreY]);
+	}
+	var step = 2 * Math.PI / 360;
+	var k = 0;
+	while (crossings(polygon, k * step) === null)
+		k++;
+	while (crossings(polygon, k * step) !== null)
+		k++;
+	// k * step is in the gap and the direction before it crosses the D.
+	// Each end of the band is found by bisection between such a pair.
+	function end(crossing, open) {
+		for (var i = 0; i < 40; i++) {
+			var middle = (crossing + open) / 2;
+			if (crossings(polygon, middle) === null)
+				open = middle;
+			else
+				crossing = middle;
+		}
+		return crossing;
+	}
+	var gapStart = end((k - 1) * step, k * step);
+	while (crossings(polygon, k * step) === null)
+		k++;
+	var gapEnd = end(k * step, (k - 1) * step);
+	bandStart = gapEnd;
+	bandSpan = gapStart + 2 * Math.PI - gapEnd;
+	// Rounding can put a sample at either end just into the gap; it then
+	// takes its neighbour's edges.
+	bandEdges = [];
+	for (var j = 0; j < bandSamples; j++)
+		bandEdges.push(crossings(polygon, bandStart + bandSpan * j / (bandSamples - 1)) || bandEdges[j - 1]);
+	if (!bandEdges[0])
+		bandEdges[0] = bandEdges[1];
+}
+
+// gearRadius returns the cogwheel's outer radius in the direction angle,
+// measured from the centre of a tooth.
+function gearRadius(angle) {
+	var period = 2 * Math.PI / gearTeeth;
+	var offset = Math.abs(((angle % period) + 1.5 * period) % period - period / 2);
+	if (offset <= gearToothTip)
+		return gearTip;
+	if (offset >= gearToothBase)
+		return gearBody;
+	return gearBody + (gearTip - gearBody) * (gearToothBase - offset) / (gearToothBase - gearToothTip);
+}
+
+function point(radius, angle) {
+	return (logoCentreX + radius * Math.cos(angle)).toFixed(2) + " " + (logoCentreY + radius * Math.sin(angle)).toFixed(2);
+}
+
+// drawLogo draws the outline for the current progress: 0 is the D and 1 the
+// cogwheel, eased at both ends.
+function drawLogo() {
+	var t = morphProgress * morphProgress * (3 - 2 * morphProgress);
+	var d = $("#run-d"), morph = $("#run-morph"), play = $("#run-play");
+	if (t == 0) {
+		d.style.display = "";
+		morph.style.display = "none";
+		play.removeAttribute("transform");
+		return;
+	}
+	// The band's ends advance into the gap, half of it each.
+	var gap = 2 * Math.PI - bandSpan;
+	var start = bandStart - t * gap / 2, span = bandSpan + t * gap;
+	// Closed, the band's last sample is its first.
+	var closed = t == 1;
+	var outer = [], inner = [];
+	for (var k = 0; k < (closed ? bandSamples - 1 : bandSamples); k++) {
+		var angle = start + span * k / (bandSamples - 1);
+		var edges = bandEdges[k];
+		// The teeth grow more slowly than the ring forms, so they rise out
+		// of a ring rather than out of the D's outline.
+		outer.push(point(edges[1] + t * (gearBody - edges[1]) + t * t * (gearRadius(angle - gearAngle) - gearBody), angle));
+		inner.push(point(edges[0] + t * (gearHole - edges[0]), angle));
+	}
+	// Open, the outline runs along the outer edge and back along the inner
+	// one; closed, the inner edge is a hole in the outer one.
+	inner.reverse();
+	morph.setAttribute("d", closed ?
+		"M" + outer.join("L") + "Z M" + inner.join("L") + "Z" :
+		"M" + outer.join("L") + "L" + inner.join("L") + "Z");
+	d.style.display = "none";
+	morph.style.display = "";
+	var scale = 1 - t * (1 - playShrink);
+	var x = playCentreX + t * (logoCentreX - playCentreX), y = playCentreY + t * (logoCentreY - playCentreY);
+	play.setAttribute("transform", "translate(" + x + " " + y + ") scale(" + scale + ") translate(" + -playCentreX + " " + -playCentreY + ")");
+}
+
+function animateLogo(now) {
+	var elapsed = now - morphTime;
+	morphTime = now;
+	var step = elapsed / morphMs;
+	morphProgress = morphTarget > morphProgress ? Math.min(morphTarget, morphProgress + step) : Math.max(morphTarget, morphProgress - step);
+	gearAngle = (gearAngle + 2 * Math.PI * elapsed / gearTurnMs) % (2 * Math.PI);
+	drawLogo();
+	morphFrame = morphProgress == 0 && morphTarget == 0 ? undefined : requestAnimationFrame(animateLogo);
+}
+
+// setRunning marks the Run button as running or not, and turns its logo
+// into the cogwheel or back. With reduced motion requested the change is
+// immediate and the cogwheel stands still.
+function setRunning(running) {
+	$("#run").classList.toggle("running", running);
+	if (!bandEdges)
+		measureLogo();
+	morphTarget = running ? 1 : 0;
+	if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+		if (morphFrame)
+			cancelAnimationFrame(morphFrame);
+		morphFrame = undefined;
+		morphProgress = morphTarget;
+		drawLogo();
+	} else if (!morphFrame) {
+		morphTime = performance.now();
+		morphFrame = requestAnimationFrame(animateLogo);
+	}
+}
+
 // run sends the program to the run API. While a run is in progress, the
 // Run button cancels it: aborting the request makes the server stop it.
 function run() {
@@ -125,7 +309,7 @@ function run() {
 		return;
 	}
 	clearMessages();
-	$("#run").classList.add("running");
+	setRunning(true);
 	var controller = runController = new AbortController();
 	fetch(runURL, {
 		method: "POST",
@@ -144,7 +328,7 @@ function run() {
 	}).then(function() {
 		if (runController === controller)
 			runController = undefined;
-		$("#run").classList.remove("running");
+		setRunning(false);
 	});
 }
 
@@ -269,10 +453,18 @@ function testToState(test) {
 	postStateFill();
 }
 
+// init shows the state in the URL's fragment. On the first load, a
+// permalink with a program runs at once; going back and forward in the
+// history does not run anything.
 function init() {
+	var runProgram = runOnLoad;
+	runOnLoad = false;
 	$("#toggle-permalink").checked = false;
 	$("nav").classList.remove("hidden");
 	var hash = unescape(location.hash.slice(1));
+	// Both permalink formats put the state after a "#"; a bare language
+	// has none.
+	var permalink = hash.indexOf("#") >= 0;
 	// tio.run's own pages: an empty fragment, its home page and its language list.
 	if (/^(|community|home|get-started)$/.test(hash))
 		hash = defaultLanguage;
@@ -290,6 +482,8 @@ function init() {
 	$("#lang-name").textContent = language.name;
 	postStateFill();
 	scrollTo(0, 0);
+	if (runProgram && permalink && ($("#header").value || $("#code").value || $("#footer").value))
+		run();
 }
 
 function clone(queryString) {
@@ -348,9 +542,6 @@ function refreshActiveField() {
 }
 
 function boot() {
-	if (ms)
-		$("#run").classList.add("ms");
-
 	iterate($$("h3 label span"), function(element) {
 		var svg = clone("#templates > .bullet");
 		element.parentNode.insertBefore(svg, element);
@@ -496,10 +687,7 @@ function boot() {
 			if (element && element.offsetParent !== null) {
 				if (element !== $("#permalink") || $("#toggle-permalink").checked)
 					toggleCommandMode();
-				if (ms && key == "R")
-					setTimeout(function(){ element.click(); }, 100);
-				else
-					element.click();
+				element.click();
 			}
 		}
 		else if (modifiers(event) == 0 && event.keyCode == 9) {

@@ -144,28 +144,95 @@ test("the page title is dyalog.run whatever the permalink", async ({ page }) => 
   await expect(page).toHaveTitle("dyalog.run");
 });
 
-test("the navigation bar shows the dyalog.run logo, which opens a new program", async ({ page }) => {
-  await page.goto("/" + fixtures.aplDyalog.fragment);
-  await expect(page.locator("#code")).toHaveValue(fixtures.aplDyalog.code);
-  const logo = page.getByRole("link", { name: "dyalog.run" });
-  await expect(logo.locator("svg")).toBeVisible();
-  await expect(logo).toHaveText("");
-
-  await logo.click();
-
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator("#code")).toHaveValue("");
-});
-
-test("the logo button is the size of the Run and permalink buttons on a phone", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+test("the navigation bar has only the Run and permalink buttons, and Run shows the logo", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#interpreter")).toBeVisible();
 
-  const [logo, run, permalink] = await Promise.all(["#site", "#run", "#permalink"].map(s => page.locator(s).boundingBox()));
-  expect(logo.width).toBeCloseTo(run.width, 0);
-  expect(logo.height).toBeCloseTo(run.height, 0);
-  expect(permalink.width).toBeCloseTo(run.width, 0);
+  expect(await page.locator("nav > *:visible").evaluateAll(buttons => buttons.map(b => b.id))).toEqual(["run", "permalink"]);
+  await expect(page.locator('#run svg path[d^="M0 0L90.9989"]')).toBeVisible();
+  await expect(page.getByRole("link", { name: "dyalog.run" })).toHaveCount(0);
+});
+
+test("opening a permalink runs its program without any input", async ({ page }) => {
+  await page.goto("/" + fixtures.aplDyalog.fragment);
+
+  await expect(page.locator("#output")).toHaveValue(fixtures.aplDyalog.output);
+});
+
+test("opening a page without a program makes no run request", async ({ page }) => {
+  const runs = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/v1/run")
+      runs.push(request.url());
+  });
+
+  for (const path of ["/", "/#apl-dyalog"]) {
+    await page.goto(path);
+    await expect(page.locator("#interpreter")).toBeVisible();
+    await page.waitForTimeout(1000);
+  }
+
+  expect(runs).toEqual([]);
+  await expect(page.locator("#output")).toHaveValue("");
+});
+
+// runButton returns an image of the Run button, with the pointer elsewhere
+// so that the image shows no hover colour.
+async function runButton(page) {
+  await page.mouse.move(5, 600);
+  return await page.locator("#run").screenshot();
+}
+
+// startLongRun opens a new program that waits three seconds, and returns
+// the Run button's image before the run starts.
+async function startLongRun(page) {
+  await page.goto("/");
+  await page.fill("#code", "⎕DL 3");
+  await page.waitForTimeout(500);
+  const idle = await runButton(page);
+  await page.locator("#code").press("Control+Enter");
+  await expect(page.locator("#run")).toHaveClass(/running/);
+  return idle;
+}
+
+test("while a run is in progress the Run button shows a spinning cogwheel, and the D again when it finishes", async ({ page }) => {
+  const idle = await startLongRun(page);
+
+  await page.waitForTimeout(1200);
+  const first = await runButton(page);
+  await page.waitForTimeout(300);
+  const second = await runButton(page);
+
+  expect(first.equals(idle)).toBe(false);
+  expect(second.equals(first)).toBe(false);
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
+  await expect.poll(async () => (await runButton(page)).equals(idle), { timeout: 3_000 }).toBe(true);
+});
+
+test("an interrupted run turns the cogwheel back into the D", async ({ page }) => {
+  const idle = await startLongRun(page);
+  await page.waitForTimeout(1200);
+  expect((await runButton(page)).equals(idle)).toBe(false);
+
+  await page.click("#run");
+
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 2_000 });
+  await expect.poll(async () => (await runButton(page)).equals(idle), { timeout: 3_000 }).toBe(true);
+});
+
+test("with reduced motion the cogwheel shows while running but does not spin", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const idle = await startLongRun(page);
+
+  await page.waitForTimeout(1200);
+  const first = await runButton(page);
+  await page.waitForTimeout(300);
+  const second = await runButton(page);
+
+  expect(first.equals(idle)).toBe(false);
+  expect(second.equals(first)).toBe(true);
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
+  await expect.poll(async () => (await runButton(page)).equals(idle), { timeout: 3_000 }).toBe(true);
 });
 
 test("the language bar sits above the navigation bar", async ({ page }) => {
@@ -219,8 +286,7 @@ test("the page makes no requests to any origin other than its own", async ({ pag
   });
 
   await page.goto("/" + fixtures.aplDyalog.fragment);
-  await page.locator("#code").press("Control+Enter");
-  await expect(page.locator("#output")).not.toHaveValue("");
+  await expect(page.locator("#output")).toHaveValue(fixtures.aplDyalog.output);
   await page.click("#permalink");
 
   expect(foreign).toEqual([]);
