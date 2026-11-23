@@ -137,7 +137,8 @@ function showResult(result) {
 // two ends moving towards each other until they meet in the middle of the
 // gap, while its edges become the cogwheel's ring and teeth. While the
 // outline is not the D's, #run-morph draws it in place of #run-d, so the
-// button at rest is exactly the logo.
+// button at rest is exactly the logo. The favicon follows the button, so
+// that a tab with a run in progress stands out.
 var logoCentreX = 112;
 var logoCentreY = 123.5;
 var bandSamples = 360;
@@ -161,6 +162,18 @@ var morphProgress = 0;
 var gearAngle = 0;
 var morphFrame;
 var morphTime;
+// A hidden page gets no animation frames, and browsers run its timers about
+// once a second, in which the cogwheel turns a whole tooth and would look
+// still. There a timer turns it by a third of a tooth instead.
+var morphTimer;
+var hiddenTickMs = 1000;
+var hiddenTurn = 2 * Math.PI / gearTeeth / 3;
+// favicon.svg is the logo at rest; otherwise the favicon is drawn in its
+// style, at most every faviconMs on animation frames.
+var faviconURL = "/favicon.svg";
+var faviconStyle = "<style>path{fill:#202020}@media(prefers-color-scheme:dark){path{fill:#F0F0F0}}</style>";
+var faviconMs = 100;
+var faviconTime = -Infinity;
 
 // crossings returns the nearest and farthest distance at which a ray from
 // the centre in the direction angle crosses the polygon, or null if it
@@ -243,15 +256,29 @@ function point(radius, angle) {
 	return (logoCentreX + radius * Math.cos(angle)).toFixed(2) + " " + (logoCentreY + radius * Math.sin(angle)).toFixed(2);
 }
 
+// drawFavicon shows the logo as the favicon or, given an outline and the
+// triangle's transform, the logo as the Run button draws it.
+function drawFavicon(outline, transform) {
+	var url = outline === undefined ? faviconURL : "data:image/svg+xml," + encodeURIComponent(
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 247">' + faviconStyle +
+		'<path d="' + outline + '"/><path d="' + $("#run-play").getAttribute("d") + '" transform="' + transform + '"/></svg>');
+	var link = $("link[rel=icon]");
+	faviconTime = performance.now();
+	if (link.getAttribute("href") != url)
+		link.setAttribute("href", url);
+}
+
 // drawLogo draws the outline for the current progress: 0 is the D and 1 the
-// cogwheel, eased at both ends.
-function drawLogo() {
+// cogwheel, eased at both ends. On an animation frame, onFrame is true and
+// the favicon is redrawn only if faviconMs have passed.
+function drawLogo(onFrame) {
 	var t = morphProgress * morphProgress * (3 - 2 * morphProgress);
 	var d = $("#run-d"), morph = $("#run-morph"), play = $("#run-play");
 	if (t == 0) {
 		d.style.display = "";
 		morph.style.display = "none";
 		play.removeAttribute("transform");
+		drawFavicon();
 		return;
 	}
 	// The band's ends advance into the gap, half of it each.
@@ -271,14 +298,18 @@ function drawLogo() {
 	// Open, the outline runs along the outer edge and back along the inner
 	// one; closed, the inner edge is a hole in the outer one.
 	inner.reverse();
-	morph.setAttribute("d", closed ?
+	var outline = closed ?
 		"M" + outer.join("L") + "Z M" + inner.join("L") + "Z" :
-		"M" + outer.join("L") + "L" + inner.join("L") + "Z");
+		"M" + outer.join("L") + "L" + inner.join("L") + "Z";
+	morph.setAttribute("d", outline);
 	d.style.display = "none";
 	morph.style.display = "";
 	var scale = 1 - t * (1 - playShrink);
 	var x = playCentreX + t * (logoCentreX - playCentreX), y = playCentreY + t * (logoCentreY - playCentreY);
-	play.setAttribute("transform", "translate(" + x + " " + y + ") scale(" + scale + ") translate(" + -playCentreX + " " + -playCentreY + ")");
+	var transform = "translate(" + x + " " + y + ") scale(" + scale + ") translate(" + -playCentreX + " " + -playCentreY + ")";
+	play.setAttribute("transform", transform);
+	if (!onFrame || performance.now() - faviconTime >= faviconMs)
+		drawFavicon(outline, transform);
 }
 
 function animateLogo(now) {
@@ -287,28 +318,47 @@ function animateLogo(now) {
 	var step = elapsed / morphMs;
 	morphProgress = morphTarget > morphProgress ? Math.min(morphTarget, morphProgress + step) : Math.max(morphTarget, morphProgress - step);
 	gearAngle = (gearAngle + 2 * Math.PI * elapsed / gearTurnMs) % (2 * Math.PI);
-	drawLogo();
+	drawLogo(true);
 	morphFrame = morphProgress == 0 && morphTarget == 0 ? undefined : requestAnimationFrame(animateLogo);
 }
 
-// setRunning marks the Run button as running or not, and turns its logo
-// into the cogwheel or back. With reduced motion requested the change is
-// immediate and the cogwheel stands still.
+// tickLogo turns the cogwheel of a hidden page, which gets no animation
+// frames, while a run is in progress.
+function tickLogo() {
+	gearAngle = (gearAngle + hiddenTurn) % (2 * Math.PI);
+	drawLogo();
+	morphTimer = setTimeout(tickLogo, hiddenTickMs);
+}
+
+// updateLogo moves the logo towards morphTarget: on animation frames while
+// the page is visible, and at once while it is hidden. With reduced motion
+// requested the change is immediate and the cogwheel stands still.
+function updateLogo() {
+	var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	clearTimeout(morphTimer);
+	morphTimer = undefined;
+	if (reduced || document.hidden) {
+		if (morphFrame !== undefined)
+			cancelAnimationFrame(morphFrame);
+		morphFrame = undefined;
+		morphProgress = morphTarget;
+		drawLogo();
+		if (!reduced && morphTarget == 1)
+			morphTimer = setTimeout(tickLogo, hiddenTickMs);
+	} else if (morphFrame === undefined && (morphProgress != 0 || morphTarget != 0)) {
+		morphTime = performance.now();
+		morphFrame = requestAnimationFrame(animateLogo);
+	}
+}
+
+// setRunning marks the Run button as running or not, and turns its logo,
+// and the favicon, into the cogwheel or back.
 function setRunning(running) {
 	$("#run").classList.toggle("running", running);
 	if (!bandEdges)
 		measureLogo();
 	morphTarget = running ? 1 : 0;
-	if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-		if (morphFrame)
-			cancelAnimationFrame(morphFrame);
-		morphFrame = undefined;
-		morphProgress = morphTarget;
-		drawLogo();
-	} else if (!morphFrame) {
-		morphTime = performance.now();
-		morphFrame = requestAnimationFrame(animateLogo);
-	}
+	updateLogo();
 }
 
 // runResult returns the run result in a 200 response's body, or undefined
@@ -707,6 +757,12 @@ function boot() {
 	}
 
 	addEventListener("popstate", init);
+	// Hiding the page stops its animation frames, and showing it resumes
+	// them; the logo is measured on the first run.
+	document.addEventListener("visibilitychange", function() {
+		if (bandEdges)
+			updateLogo();
+	});
 	addEventListener("beforeunload", function() { saveState(); });
 	addEventListener("keyup", refreshActiveField);
 	addEventListener("mouseup", refreshActiveField);
