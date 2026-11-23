@@ -49,7 +49,8 @@ lb, revision 342eec94a23c7eaff5e179ceaff5df2938805c73 (lb.js)
   https://github.com/abrudz/lb
   Copyright (c) 2011-2020 Nikolay G. Nikolov and Adam Brudzevski
   Licensed under the MIT licence (text below). Modified: the close
-  button, the style elements and the body margin it set are removed.
+  button, the style elements, the body margin it set and the div it
+  wrapped the bar in are removed.
 
 APL387 Unicode and APL335 Unicode, release 2026-10-30 (APL387.woff,
 APL387.woff2, APL335.woff, APL335.woff2)
