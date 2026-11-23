@@ -1,5 +1,5 @@
-// Permalinks captured from pages that link to tio.run. The fragment after
-// "https://tio.run/" is what a user pastes after this site's address.
+// Permalinks, mostly captured from pages that link to tio.run. The fragment
+// after "https://tio.run/" is what a user pastes after this site's address.
 module.exports = {
   // https://github.com/hugoferreira/golf-during-covid/blob/master/day6.md
   aplDyalog: {
@@ -17,5 +17,12 @@ module.exports = {
   javascript: {
     fragment: "##y0osSyxOLsosKNEts/j/Py@zLDXPNt7Wrjotv0gjz9bQOs/G0ABIamtr5qlq5OkbGmjnqRoa1Bho1tQUFGXmlWjkadZCtGlo/gcA",
     language: "javascript-v8",
+  },
+  // A permalink made on this site: a program that prints its input's first
+  // line, with the input "hi" and no final line break.
+  readInput: {
+    fragment: "##SyzI0U2pTMzJT////1Hf1EdtEx71zvv/PyMTAA",
+    code: "⎕←⍞",
+    input: "hi",
   },
 };
