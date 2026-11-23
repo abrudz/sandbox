@@ -252,6 +252,20 @@ test("the language bar sits above the navigation bar", async ({ page }) => {
   expect((await page.locator("#interpreter h2").boundingBox()).y).toBeGreaterThanOrEqual(n.y + n.height);
 });
 
+test("the language bar is a child of the body", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".ngn_lb b").first()).toBeVisible();
+
+  await expect(page.locator("body > .ngn_lb")).toHaveCount(1);
+});
+
+test("the language bar's bottom border is transparent", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".ngn_lb b").first()).toBeVisible();
+
+  expect(await page.locator(".ngn_lb").evaluate(e => getComputedStyle(e).borderBottomColor)).toBe("rgba(0, 0, 0, 0)");
+});
+
 test("the language bar has no close button", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".ngn_lb b").first()).toBeVisible();

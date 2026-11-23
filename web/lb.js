@@ -1,6 +1,7 @@
 // abrudz/lb at 342eec94a23c7eaff5e179ceaff5df2938805c73, without the close
-// button, its style elements and the body margin it set: the bar is part
-// of the page's fixed layout, which frontend.js and frontend.css manage.
+// button, its style elements, the body margin it set and the div it wrapped
+// the bar in: the bar is part of the page's fixed layout, which frontend.js
+// and frontend.css manage.
 ; (_ => {
 	let hc = { '<': '&lt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }, he = x => x.replace(/[<&'"]/g, c => hc[c]) //html chars and escape fn
 		, tcs = '<-←xx×/\\×:-÷*O⍟○*⍟[-⌹-]⌹⎕÷⌹[÷⌹]÷⌹OO○77⌈FF⌈ll⌊LL⌊T_⌶II⌶⊥⊤⌶|_⊥TT⊤-|⊣|-⊢=/≠L-≠<=≤<_≤>=≥>_≥==≡=_≡7=≢Z-≢≠_≢vv∨^^∧^~⍲∧~⍲v~⍱∨~⍱^|↑v|↓((⊂cc⊂(_⊆c_⊆⊂_⊆))⊃[|⌷|]⌷A|⍋∆|⍋V|⍒∇|⍒ii⍳i_⍸⍳_⍸ee∊e_⍷∊_⍷' +
@@ -30,10 +31,9 @@
 		for (let j = 0; j < bqk.length; j++)if (lbs[i][0] === bqv[j]) ks.push('\n` ' + bqk[j])
 		lbh += '<b title="' + he(lbs[i].slice(1) + (ks.length ? '\n' + ks.join('') : '')) + '">' + lbs[i][0] + '</b>'
 	}
-	let d = document, el = d.createElement('div'); el.innerHTML =
-		`<div class=ngn_lb>${lbh}</div>`
-	d.body.appendChild(el)
-	let t, ts = [], lb = el.firstChild, bqm = 0 //t:textarea or input, lb:language bar, bqm:backquote mode
+	let d = document, lb = d.createElement('div'); lb.className = 'ngn_lb'; lb.innerHTML = lbh
+	d.body.appendChild(lb)
+	let t, ts = [], bqm = 0 //t:textarea or input, lb:language bar, bqm:backquote mode
 	let pd = x => x.preventDefault()
 	let ev = (x, t, f, c) => x.addEventListener(t, f, c)
 	ev(lb, 'mousedown', x => {
