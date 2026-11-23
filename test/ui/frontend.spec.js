@@ -607,3 +607,103 @@ test("Escape then W opens the APL Wiki in a new tab", async ({ page, context }) 
   await tab.waitForLoadState();
   expect(tab.url()).toBe("https://aplwiki.com/");
 });
+
+// favicon returns the address of the page's favicon.
+async function favicon(page) {
+  return await page.locator("link[rel=icon]").getAttribute("href");
+}
+
+// faviconFills opens a favicon in a page of its own with the given colour
+// scheme, and returns the fill of each of its paths.
+async function faviconFills(context, url, colorScheme) {
+  const page = await context.newPage();
+  await page.emulateMedia({ colorScheme });
+  await page.goto(url);
+  const fills = await page.locator("path").evaluateAll(paths => paths.map(path => getComputedStyle(path).fill));
+  await page.close();
+  return fills;
+}
+
+const lightFills = ["rgb(32, 32, 32)", "rgb(32, 32, 32)"];
+const darkFills = ["rgb(240, 240, 240)", "rgb(240, 240, 240)"];
+
+test("the favicon is the Run button's logo, #202020 on a light theme and #F0F0F0 on a dark one", async ({ page, context }) => {
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+
+  const url = new URL(await favicon(page), page.url()).href;
+  expect(url).toMatch(/^https?:/);
+  const response = await page.request.get(url);
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toMatch(/^image\/svg\+xml/);
+  const svg = await response.text();
+  for (const id of ["run-d", "run-play"])
+    expect(svg).toContain(`d="${await page.locator("#" + id).getAttribute("d")}"`);
+  expect(await faviconFills(context, url, "light")).toEqual(lightFills);
+  expect(await faviconFills(context, url, "dark")).toEqual(darkFills);
+});
+
+test("while a run is in progress the favicon turns with the Run button in the same colours, and is the logo again when the run finishes", async ({ page, context }) => {
+  await page.goto("/");
+  await page.fill("#code", "⎕DL 3");
+  const idle = await favicon(page);
+
+  await page.locator("#code").press("Control+Enter");
+
+  await page.waitForTimeout(1200);
+  const first = await favicon(page);
+  await page.waitForTimeout(300);
+  const second = await favicon(page);
+  expect(first).not.toBe(idle);
+  expect(second).not.toBe(first);
+  expect(await faviconFills(context, second, "light")).toEqual(lightFills);
+  expect(await faviconFills(context, second, "dark")).toEqual(darkFills);
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
+  await expect.poll(() => favicon(page), { timeout: 3_000 }).toBe(idle);
+});
+
+// hideTab makes the page behave as a hidden tab does: it reports itself
+// hidden, and it gets no animation frames.
+async function hideTab(page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(document, "hidden", { get: () => true });
+    Object.defineProperty(document, "visibilityState", { get: () => "hidden" });
+    window.requestAnimationFrame = () => 0;
+  });
+}
+
+test("in a hidden tab the favicon turns while a run is in progress, and is the logo again as soon as the run ends", async ({ page }) => {
+  await hideTab(page);
+  await page.goto("/");
+  await page.fill("#code", "⎕DL 4");
+  const idle = await favicon(page);
+
+  await page.locator("#code").press("Control+Enter");
+
+  await page.waitForTimeout(1500);
+  const first = await favicon(page);
+  await page.waitForTimeout(1200);
+  const second = await favicon(page);
+  expect(first).not.toBe(idle);
+  expect(second).not.toBe(first);
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
+  await expect.poll(() => favicon(page), { timeout: 500 }).toBe(idle);
+});
+
+test("with reduced motion the favicon shows the cogwheel while running but does not turn", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await page.fill("#code", "⎕DL 3");
+  const idle = await favicon(page);
+
+  await page.locator("#code").press("Control+Enter");
+
+  await page.waitForTimeout(1200);
+  const first = await favicon(page);
+  await page.waitForTimeout(300);
+  const second = await favicon(page);
+  expect(first).not.toBe(idle);
+  expect(second).toBe(first);
+  await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
+  await expect.poll(() => favicon(page), { timeout: 3_000 }).toBe(idle);
+});
