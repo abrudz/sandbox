@@ -35,7 +35,7 @@ function deflate(byteString) {
 }
 
 function inflate(byteString) {
-	return byteArrayToByteString(pako.inflateRaw(byteString));
+	return byteArrayToByteString(pako.inflateRaw(byteStringToByteArray(byteString)));
 }
 
 function byteStringToBase64(byteString) {

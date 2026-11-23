@@ -24,11 +24,11 @@ function interpreterRunning() {
   return names.split("\n").includes("dyalog");
 }
 
-test("opening / shows the Dyalog APL interpreter page with TIO's sections and no language list", async ({ page }) => {
+test("opening / shows the Dyalog interpreter page with TIO's sections and no language list", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#interpreter")).toBeVisible();
-  await expect(page.locator("#lang-name")).toHaveText("Dyalog APL");
+  await expect(page.locator("#lang-name")).toHaveText("Dyalog");
   for (const section of ["Header", "Code", "Footer", "Input", "Arguments", "Output", "Debug"])
     await expect(page.locator("#interpreter h3 label span", { hasText: new RegExp(`^${section}$`) })).toBeVisible();
   await expect(page.locator("#results, #search, #lang-switch")).toHaveCount(0);
@@ -109,10 +109,12 @@ test("a tio.run permalink for apl-dyalog opens with the same fields when its hos
   await expect(page.locator("#cla-wrapper textarea")).toHaveCount(0);
 });
 
-test("a permalink for any other language shows TIO's language-not-found message", async ({ page }) => {
+test("a permalink for any other language shows that the language could not be found, without advice to refresh", async ({ page }) => {
   await page.goto("/" + fixtures.javascript.fragment);
 
-  await expect(page.locator("#messages .message", { hasText: "The requested language could not be found" })).toBeVisible();
+  const message = page.locator("#messages .message", { hasText: "The requested language could not be found" });
+  await expect(message).toBeVisible();
+  await expect(message).not.toContainText(/refresh|cach/i);
   await expect(page.locator("#interpreter")).toBeHidden();
 });
 
@@ -144,11 +146,11 @@ test("the page title is dyalog.run whatever the permalink", async ({ page }) => 
   await expect(page).toHaveTitle("dyalog.run");
 });
 
-test("the navigation bar has only the Run and permalink buttons, and Run shows the logo", async ({ page }) => {
+test("the navigation bar has the Run and permalink buttons and the APL Wiki button, and Run shows the logo", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#interpreter")).toBeVisible();
 
-  expect(await page.locator("nav > *:visible").evaluateAll(buttons => buttons.map(b => b.id))).toEqual(["run", "permalink"]);
+  expect(await page.locator("nav > *:visible").evaluateAll(buttons => buttons.map(b => b.id))).toEqual(["run", "permalink", "wiki"]);
   await expect(page.locator('#run svg path[d^="M0 0L90.9989"]')).toBeVisible();
   await expect(page.getByRole("link", { name: "dyalog.run" })).toHaveCount(0);
 });
@@ -396,4 +398,198 @@ test("a run the user cancels leaves Output and Debug as they were", async ({ pag
   await expect(page.locator("#run")).not.toHaveClass(/running/);
   await expect(page.locator("#output")).toHaveValue("4\n");
   await expect(page.locator("#debug")).toHaveValue(debug);
+});
+
+test("the page requests no language list", async ({ page }) => {
+  const paths = [];
+  page.on("request", request => paths.push(new URL(request.url()).pathname));
+
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  expect(paths.filter(path => /languages/.test(path))).toEqual([]);
+});
+
+test("the Hello World example fills the code with Dyalog's Hello World program", async ({ page }) => {
+  await page.goto("/");
+
+  await page.click("#lang-example");
+
+  await expect(page.locator("#code")).toHaveValue("⎕←'Hello, World!'");
+});
+
+test("the code's size is shown in characters and UTF-8 bytes", async ({ page }) => {
+  await page.goto("/");
+
+  await page.fill("#code", "⎕←1");
+
+  await expect(page.locator("#code-info")).toHaveText("3 chars, 7 bytes (UTF-8)");
+});
+
+test("opening a permalink whose input has no final line break reads that input as a complete line", async ({ page }) => {
+  await page.goto("/" + fixtures.readInput.fragment);
+  await expect(page.locator("#code")).toHaveValue(fixtures.readInput.code);
+  await expect(page.locator("#input")).toHaveValue(fixtures.readInput.input);
+
+  await expect(page.locator("#output")).toHaveValue("hi\n");
+  await expect(page.locator("#debug")).not.toHaveValue(/EOF INTERRUPT/);
+});
+
+for (const [kind, input, sent] of [
+  ["without a final line break is sent with one", "a\nb", "a\nb\n"],
+  ["that ends with a line break is sent with another, so that its last line is empty", "a\nb\n", "a\nb\n\n"],
+  ["that is empty is sent as one empty line", "", "\n"],
+])
+  test(`input ${kind}`, async ({ page }) => {
+    const bodies = [];
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/api/v1/run")
+        bodies.push(request.postDataJSON());
+    });
+    await page.goto("/");
+    await page.fill("#code", "⎕←1");
+    if (input) {
+      await openSection(page, "input");
+      await page.fill("#input", input);
+    }
+
+    await page.locator("#code").press("Control+Enter");
+
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0].input).toBe(sent);
+    await expect(page.locator("#input")).toHaveValue(input);
+  });
+
+test("a line break at the end of Input answers a prompt with an empty line", async ({ page }) => {
+  await page.goto("/");
+  await page.fill("#code", "⎕←⍞\n⎕←'[',⍞,']'");
+  await openSection(page, "input");
+  await page.fill("#input", "a\n");
+
+  await page.locator("#code").press("Control+Enter");
+
+  await expect(page.locator("#output")).toHaveValue("a\n[]\n");
+  await expect(page.locator("#debug")).not.toHaveValue(/EOF INTERRUPT/);
+});
+
+test("the page's styles all come from its stylesheet", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".ngn_lb b").first()).toBeVisible();
+
+  await expect(page.locator("style")).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.getAttribute("style"))).toBeNull();
+});
+
+test("the page defines no fonts other than APL335 and APL387", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+
+  const families = await page.evaluate(() => [...new Set([...document.fonts].map(face => face.family.replace(/"/g, "")))].sort());
+  expect(families).toEqual(["APL335", "APL387"]);
+});
+
+test("text outside the code fields and the language bar uses the APL335 font", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+
+  for (const selector of ["body", "#lang-name", "#lang-version", "#interpreter h3", "#lang-example span", ".array-add span", "#code-info"])
+    expect(await page.locator(selector).first().evaluate(e => getComputedStyle(e).fontFamily), selector).toMatch(/^"?APL335"?(,|$)/);
+  await expect.poll(() => page.evaluate(() =>
+    [...document.fonts].some(face => face.family.replace(/"/g, "") === "APL335" && face.status === "loaded"))).toBe(true);
+});
+
+// emphasis returns the weight, text stroke width and letter spacing of the
+// first element that matches the selector.
+async function emphasis(page, selector) {
+  return await page.locator(selector).first().evaluate(e => {
+    const style = getComputedStyle(e);
+    return { weight: style.fontWeight, stroke: parseFloat(style.webkitTextStrokeWidth), spacing: parseFloat(style.letterSpacing) || 0 };
+  });
+}
+
+test("bold text has normal weight, a text stroke and letter spacing; plain text in a heading has neither", async ({ page }) => {
+  await page.goto("/" + fixtures.javascript.fragment);
+  await expect(page.locator("#messages .message:visible h4")).toBeVisible();
+  const bold = { "error title": await emphasis(page, "#messages .message:visible h4") };
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+  for (const selector of ["#lang-name", "#lang-example span", "#interpreter h3", ".array-add span"])
+    bold[selector] = await emphasis(page, selector);
+
+  for (const [name, style] of Object.entries(bold)) {
+    expect(style.weight, name).toBe("400");
+    expect(style.stroke, name).toBeGreaterThan(0);
+    expect(style.spacing, name).toBeGreaterThan(0);
+  }
+  expect(await emphasis(page, "#lang-version")).toEqual({ weight: "400", stroke: 0, spacing: 0 });
+});
+
+// box returns an element's position and size, rounded to whole pixels.
+async function box(locator) {
+  const b = await locator.boundingBox();
+  return { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) };
+}
+
+for (const [device, viewport] of [["a desktop", { width: 1280, height: 720 }], ["a phone", { width: 360, height: 640 }]])
+  test(`on ${device}, the APL Wiki button sits at the right end of the navigation bar, level with and the size of the Run button`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await expect(page.locator("#wiki")).toBeVisible();
+
+    const run = await box(page.locator("#run")), permalink = await box(page.locator("#permalink"));
+    const wiki = await box(page.locator("#wiki")), nav = await box(page.locator("nav"));
+    expect({ y: wiki.y, width: wiki.width, height: wiki.height }).toEqual({ y: run.y, width: run.width, height: run.height });
+    expect(wiki.x + wiki.width).toBe(nav.x + nav.width);
+    expect(wiki.x).toBeGreaterThan(permalink.x + permalink.width);
+  });
+
+test("the APL Wiki button shows the APL logo in the colours of the Run button", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#interpreter")).toBeVisible();
+  await page.mouse.move(5, 600);
+
+  const logo = page.locator('#wiki svg path[d^="M1837.93 1692.64"]');
+  await expect(logo).toBeVisible();
+  const colours = async (button, path) => ({
+    background: await page.locator(button).evaluate(e => getComputedStyle(e).backgroundColor),
+    fill: await page.locator(path).evaluate(e => getComputedStyle(e).fill),
+    height: Math.round((await page.locator(button + " svg").boundingBox()).height),
+  });
+  expect(await colours("#wiki", '#wiki svg path[d^="M1837.93 1692.64"]')).toEqual(await colours("#run", "#run-d"));
+});
+
+// stubWiki answers requests for the APL Wiki, so that the tests do not
+// depend on another site.
+async function stubWiki(context) {
+  await context.route("https://aplwiki.com/**", route => route.fulfill({ contentType: "text/html", body: "<title>APL Wiki</title>" }));
+}
+
+test("clicking the APL Wiki button opens the APL Wiki in a new tab, leaving the program open", async ({ page, context }) => {
+  await stubWiki(context);
+  await page.goto("/");
+  await expect(page.locator("#wiki")).toBeVisible();
+  await page.fill("#code", "⎕←1");
+
+  const [tab] = await Promise.all([context.waitForEvent("page"), page.click("#wiki")]);
+
+  await tab.waitForLoadState();
+  expect(tab.url()).toBe("https://aplwiki.com/");
+  expect(page.url()).not.toContain("aplwiki");
+  await expect(page.locator("#code")).toHaveValue("⎕←1");
+});
+
+test("Escape then W opens the APL Wiki in a new tab", async ({ page, context }) => {
+  await stubWiki(context);
+  await page.goto("/");
+  await expect(page.locator("#wiki")).toBeVisible();
+  await page.locator("#code").click();
+
+  const [tab] = await Promise.all([context.waitForEvent("page"), (async () => {
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("w");
+  })()]);
+
+  await tab.waitForLoadState();
+  expect(tab.url()).toBe("https://aplwiki.com/");
 });

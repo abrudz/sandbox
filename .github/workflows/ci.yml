@@ -14,8 +14,8 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -36,9 +36,9 @@ jobs:
 
       - name: staticcheck
         run: |
-          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
-          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 -tags integration ./...
-          go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 -tags deploy ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 -tags integration ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 -tags deploy ./...
 
       - name: shellcheck
         run: |
@@ -52,10 +52,10 @@ jobs:
       - name: Unit tests
         run: go test -count=1 ./...
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: ${{ !cancelled() }}
         with:
-          node-version: 20
+          node-version: 26
 
       - name: Frontend scripts
         if: ${{ !cancelled() }}
@@ -79,8 +79,8 @@ jobs:
       SITE_ADDRESS: http://localhost
       SANDBOX_IMAGE: localhost:5000/sandbox:latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 

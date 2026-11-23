@@ -1,24 +1,16 @@
 /* TIO's stylesheet (github.com/TryItOnline/tryitonline, MIT), reduced to the
    interpreter page, with rules for lb.js's language bar. */
 
+/* APL335 has one weight, so bold text is drawn at that weight with a text
+   stroke and wider letter spacing rather than synthesised by the browser. */
 @font-face {
 	font-display: swap;
-	font-family: 'Exo 2';
+	font-family: 'APL335';
 	font-style: normal;
 	font-weight: 400;
 	src:
-		url(/Exo2-Regular.woff2) format('woff2'),
-		url(/Exo2-Regular.woff) format('woff');
-}
-
-@font-face {
-	font-display: swap;
-	font-family: 'Exo 2';
-	font-style: normal;
-	font-weight: 600;
-	src:
-		url(/Exo2-SemiBold.woff2) format('woff2'),
-		url(/Exo2-SemiBold.woff) format('woff');
+		url(/APL335.woff2) format('woff2'),
+		url(/APL335.woff) format('woff');
 }
 
 @font-face {
@@ -95,10 +87,14 @@ nav > *:not(:last-child) {
 	margin-right: 4%;
 }
 
+#wiki {
+	margin-left: auto;
+}
+
 body {
 	background: #383838;
 	color: #C0C0C0;
-	font-family: 'Exo 2', sans-serif;
+	font-family: 'APL335', sans-serif;
 	font-weight: 400;
 	margin: 0;
 	overflow-x: hidden;
@@ -128,7 +124,7 @@ body {
 }
 
 h2 {
-	font-weight: 600;
+	font-weight: 400;
 	height: 20px;
 	line-height: 20px;
 	margin: 12px 0;
@@ -136,7 +132,9 @@ h2 {
 
 h3 {
 	font-size: 16px;
-	font-weight: 600;
+	font-weight: 400;
+	letter-spacing: 0.05ch;
+	-webkit-text-stroke: 0.05ch;
 	line-height: 20px;
 	margin: 12px 0 12px 18px;
 	text-indent: -18px;
@@ -147,8 +145,15 @@ h3 label {
 	white-space: nowrap;
 }
 
+/* #main's font size is 0, which the heading inherits, so the heading's
+   emphasis, measured in its font's units, is set on its text. */
 #lang-name {
 	font-size: 20px;
+}
+
+#lang-name, #lang-example span {
+	letter-spacing: 0.05ch;
+	-webkit-text-stroke: 0.05ch;
 }
 
 #lang-version {
@@ -162,8 +167,10 @@ h3 label {
 .prose {
 	font-size: 16px;
 	font-weight: 400;
+	letter-spacing: normal;
 	line-height: 20px;
 	text-indent: 0;
+	-webkit-text-stroke: 0;
 }
 
 /* #main's font size is 0, so as inline boxes these would have no height of
@@ -173,9 +180,9 @@ h3 label {
 }
 
 .array-add span, .array-remove span {
-	font-family: 'Exo 2', sans-serif;
 	font-size: 16px;
-	font-weight: 600;
+	letter-spacing: 0.05ch;
+	-webkit-text-stroke: 0.05ch;
 }
 
 #lang-example:hover,
@@ -291,7 +298,6 @@ input[id^=toggle-]:checked + h3 {
 
 #templates,
 .hidden,
-#toggle-index:not(:checked) ~ #main #index,
 #toggle-interpreter:not(:checked) ~ #main #interpreter,
 #toggle-interpreter:not(:checked) ~ nav #run,
 #toggle-interpreter:not(:checked) ~ nav #permalink,
@@ -336,8 +342,10 @@ body.command-mode [data-hotkey] * {
 	color: #C0C0C0;
 	display: flex;
 	font-size: 16px;
-	font-weight: 600;
+	font-weight: 400;
+	letter-spacing: 0.05ch;
 	margin: 0 0 8px 0;
+	-webkit-text-stroke: 0.05ch;
 }
 
 .message div, .prose {
@@ -362,24 +370,31 @@ body.command-mode textarea {
 }
 
 /* lb.js's language bar sits at the top of the window, above the navigation
-   bar (frontend.js sets the navigation bar's top and #main's), in the
-   page's colours. lb.js styles it after this stylesheet loads, so these
-   rules need the higher specificity, and the body margin it sets is not
-   used by the fixed layout. */
-body {
-	margin-top: 0 !important;
-}
-
-body .ngn_lb {
+   bar; frontend.js sets the navigation bar's top and #main's from the
+   bar's height. lb.js adds the ngn_bq class to the body while a backtick
+   awaits its second key. */
+.ngn_lb {
 	background-color: #303030;
 	border-bottom: solid #202020 1px;
 	color: #C0C0C0;
 	font-family: 'APL387', monospace;
 	font-size: 16px;
+	left: 0;
+	padding: 2px 2px 0 2px;
+	position: fixed;
+	right: 0;
+	top: 0;
+	word-wrap: break-word;
 	z-index: 1;
 }
 
-body .ngn_lb b:hover, body.ngn_bq .ngn_lb {
+.ngn_lb b {
+	cursor: pointer;
+	font-weight: 400;
+	padding: 0 1px;
+}
+
+.ngn_lb b:hover, .ngn_bq .ngn_lb {
 	background-color: #202020;
 	color: #F0F0F0;
 }

@@ -32,7 +32,7 @@ RUN make -j"$(nproc)" \
       | xargs -r realpath | xargs -r dpkg -S | cut -d: -f1 | sort -u \
       > /out/runtime-packages
 
-FROM docker.io/library/golang:1.24-bookworm AS runner-api
+FROM docker.io/library/golang:1.27-trixie AS runner-api
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd

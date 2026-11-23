@@ -1,5 +1,6 @@
 // abrudz/lb at 342eec94a23c7eaff5e179ceaff5df2938805c73, without the close
-// button: the bar is part of the page's fixed layout.
+// button, its style elements and the body margin it set: the bar is part
+// of the page's fixed layout, which frontend.js and frontend.css manage.
 ; (_ => {
 	let hc = { '<': '&lt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }, he = x => x.replace(/[<&'"]/g, c => hc[c]) //html chars and escape fn
 		, tcs = '<-←xx×/\\×:-÷*O⍟○*⍟[-⌹-]⌹⎕÷⌹[÷⌹]÷⌹OO○77⌈FF⌈ll⌊LL⌊T_⌶II⌶⊥⊤⌶|_⊥TT⊤-|⊣|-⊢=/≠L-≠<=≤<_≤>=≥>_≥==≡=_≡7=≢Z-≢≠_≢vv∨^^∧^~⍲∧~⍲v~⍱∨~⍱^|↑v|↓((⊂cc⊂(_⊆c_⊆⊂_⊆))⊃[|⌷|]⌷A|⍋∆|⍋V|⍒∇|⍒ii⍳i_⍸⍳_⍸ee∊e_⍷∊_⍷' +
@@ -30,14 +31,7 @@
 		lbh += '<b title="' + he(lbs[i].slice(1) + (ks.length ? '\n' + ks.join('') : '')) + '">' + lbs[i][0] + '</b>'
 	}
 	let d = document, el = d.createElement('div'); el.innerHTML =
-		`<div class=ngn_lb>${lbh}</div>
- <style>@font-face{font-family:"DejaVu Sans Mono";src:local("DejaVu Sans Mono"),url(DejaVuBQNSansMono.ttf)format('ttf');}</style>
- <style>
-  .ngn_lb{position:fixed;top:0;left:0;right:0;background-color:#eee;color:#000;cursor:default;z-index:2147483647;
-    font-family:"DejaVu Sans Mono",monospace;border-bottom:solid #999 1px;padding:2px 2px 0 2px;word-wrap:break-word;}
-  .ngn_lb b{cursor:pointer;padding:0 1px;font-weight:normal}
-  .ngn_lb b:hover,.ngn_bq .ngn_lb{background-color:#777;color:#fff}
- </style>`
+		`<div class=ngn_lb>${lbh}</div>`
 	d.body.appendChild(el)
 	let t, ts = [], lb = el.firstChild, bqm = 0 //t:textarea or input, lb:language bar, bqm:backquote mode
 	let pd = x => x.preventDefault()
@@ -69,7 +63,5 @@
 		if (nn !== 'textarea' && (nn !== 'input' || t0.type !== 'text' && t0.type !== 'search')) return
 		t = t0; if (!t.ngn) { t.ngn = 1; ts.push(t); ev(t, 'keydown', fk) }
 	}
-	let upd = _ => { d.body.style.marginTop = lb.clientHeight + 'px' }
-	upd(); ev(window, 'resize', upd)
 	ev(d, 'focus', ff, !0); let ae = d.activeElement; ae && ff({ type: 'focus', target: ae })
 })();
