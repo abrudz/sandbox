@@ -114,7 +114,7 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 
 - `stdout` and `stderr` hold exactly what the interpreter wrote, as UTF-8 strings (invalid byte sequences replaced by U+FFFD). The API does not alter line endings; presentation is the client's concern.
 - Errors: `400` malformed request, `413` request too large, `429` no free concurrency slot or client over its rate limit, `503` sandbox unavailable or shutting down.
-- `GET /api/v1/version` returns `{"dyalogVersion": "...", "imageDigest": "sha256:...", "commit": "..."}` from the image labels.
+- `GET /api/v1/version` returns `{"dyalogVersion": "...", "imageDigest": "sha256:...", "commit": "...", "timeoutMs": 10000}`: the first three from the image labels, and the run time limit.
 - `GET /healthz` returns `200` when the API is serving.
 - On `SIGTERM`, `runner-api` stops accepting runs, lets runs in progress finish, then exits.
 
@@ -134,6 +134,7 @@ Changed:
 
 - The page opens directly on `apl-dyalog`. TIO's home page, language list, search and "switch languages" control are removed.
 - Run sends JSON to `/api/v1/run` instead of TIO's compressed `cgi-bin` protocol. Cancelling aborts the request, which ends the run on the server.
+- A run whose request gets no response is given up once the run time limit and a margin of 10 s have passed. A response that is not a run result, an error status and a connection failure each end the run with their own message, and leave Output and Debug empty.
 - Output shows stdout. Debug shows stderr followed by TIO's timing lines (Real time, User time, Sys. time, CPU share, Exit code), built from the response. Truncation and time-limit notices use TIO's wording.
 - TIO's branding, sponsor, donation and social links are removed, as is its unused GitHub sign-in and cache-probe code. The site name `dyalog.run` replaces "Try It Online", including in the permalink formats.
 

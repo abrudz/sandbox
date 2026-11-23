@@ -45,8 +45,8 @@ type Options struct {
 	ImageDigest string
 	// Commit is the commit of this repository the image was built from.
 	Commit string
-	// Timeout is the wall-clock limit of one run, enforced by the
-	// executor.
+	// Timeout is the wall-clock limit of one run, reported by
+	// /api/v1/version; the executor enforces it.
 	Timeout time.Duration
 }
 
@@ -212,12 +212,21 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request) (runRequest, int
 	return req, 0, ""
 }
 
-// version reports the interpreter version that runs programs.
+type versionResponse struct {
+	DyalogVersion string `json:"dyalogVersion"`
+	ImageDigest   string `json:"imageDigest"`
+	Commit        string `json:"commit"`
+	TimeoutMs     int64  `json:"timeoutMs"`
+}
+
+// version reports the interpreter version that runs programs, and the run
+// time limit, which tells the frontend how long a run's response can take.
 func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]string{
-		"dyalogVersion": s.opts.DyalogVersion,
-		"imageDigest":   s.opts.ImageDigest,
-		"commit":        s.opts.Commit,
+	writeJSON(w, versionResponse{
+		DyalogVersion: s.opts.DyalogVersion,
+		ImageDigest:   s.opts.ImageDigest,
+		Commit:        s.opts.Commit,
+		TimeoutMs:     s.opts.Timeout.Milliseconds(),
 	})
 }
 
