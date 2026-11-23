@@ -37,12 +37,12 @@ The public instance puts Caddy in front of the container for TLS.
 
 - `image/Containerfile` is a multi-stage build:
   1. Build nsjail 3.6 from source; Debian does not package it.
-  2. Build `runner-api` with Go 1.24.
+  2. Build `runner-api` with Go 1.27.
   3. Final stage `FROM docker.io/dyalog/dyalog:latest`, adding nsjail's runtime libraries, nsjail, `runner-api`, `web/`, `image/run`, `image/nsjail.cfg`, the seccomp policy and `image/entrypoint`.
 - `image/entrypoint` replaces the base image's entry point, which prints a banner. It moves itself into a leaf cgroup, enables the `cpu`, `memory` and `pids` controllers for child cgroups, and then starts `runner-api`.
 - `runner-api` runs as root inside the container because nsjail needs that to create namespaces and cgroups. Every run executes as an unprivileged uid inside its own user namespace.
 - The host needs cgroup v2 and Docker Engine, Docker Desktop or rootful Podman. The container must run with `--privileged`, which is how nsjail's own documentation runs it under Docker. The container is therefore not a security boundary: the jail is, and on the public instance a dedicated VM that holds no secrets is the outer boundary.
-- The image keeps Dyalog's `LICENSE` file, as the base image's README requires for derived images. `THIRD_PARTY_NOTICES` lists TIO's frontend (MIT), pako (MIT), `abrudz/lb` (MIT) and nsjail (Apache-2.0); it ships in the repository and in the image.
+- The image keeps Dyalog's `LICENSE` file, as the base image's README requires for derived images. `THIRD_PARTY_NOTICES` lists TIO's frontend (MIT), pako (MIT and zlib), `abrudz/lb` (MIT), the APL387 and APL335 fonts (Unlicense), the APL logo (CC0) and nsjail (Apache-2.0); it ships in the repository and in the image.
 - The build sets three labels: the upstream image digest, the full Dyalog version (read from the interpreter during the build) and the source commit.
 - Published images cover amd64 only.
 
@@ -120,7 +120,7 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 
 ### Frontend
 
-`web/` is a copy of TIO's frontend from `usr/share/tio.run/` (`index.html`, `frontend.js`, `frontend.css`, fonts, icons, `pako.min.js`), with a one-entry `languages.json` taken from TIO's `apl-dyalog` entry. TIO's build step (`sbin/tiobuild`) filled `${tio_*}` placeholders with content-hashed file names; the copy uses fixed paths instead.
+`web/` is a copy of TIO's frontend from `usr/share/tio.run/` (`index.html`, `frontend.js`, `frontend.css`, fonts, icons, `pako.min.js`), reduced to TIO's `apl-dyalog` language, whose name, link and Hello World program `frontend.js` holds in place of TIO's `languages.json`. TIO's build step (`sbin/tiobuild`) filled `${tio_*}` placeholders with content-hashed file names; the copy uses fixed paths instead.
 
 Kept from TIO's interpreter page:
 
@@ -132,7 +132,9 @@ Kept from TIO's interpreter page:
 
 Changed:
 
-- The page opens directly on `apl-dyalog`. TIO's home page, language list, search and "switch languages" control are removed.
+- The page opens directly on `apl-dyalog`. TIO's home page, language list, search and "switch languages" control are removed. A permalink for another language shows that the language could not be found.
+- Input is sent with a line break added at its end, so that its last line can be read with `⍞`.
+- Text outside the code fields and the language bar uses APL335; bold text is drawn with a text stroke and letter spacing, since APL335 has one weight.
 - Run sends JSON to `/api/v1/run` instead of TIO's compressed `cgi-bin` protocol. Cancelling aborts the request, which ends the run on the server.
 - A run whose request gets no response is given up once the run time limit and a margin of 10 s have passed. A response that is not a run result, an error status and a connection failure each end the run with their own message, and leave Output and Debug empty.
 - Output shows stdout. Debug shows stderr followed by TIO's timing lines (Real time, User time, Sys. time, CPU share, Exit code), built from the response. Truncation and time-limit notices use TIO's wording.
@@ -142,6 +144,7 @@ Added:
 
 - APL glyph input through `abrudz/lb`: a language bar and backtick key bindings.
 - The Dyalog version, from `/api/v1/version`, in the language heading.
+- An APL Wiki button at the right end of the toolbar (hotkey W), which opens the APL Wiki in a new tab.
 
 ### Publishing and updates
 
@@ -163,7 +166,7 @@ cmd/runner-api/        HTTP server, static file serving, configuration
 internal/api/          request validation, JSON contract, concurrency and rate limits
 internal/sandbox/      Executor interface and the nsjail implementation
 image/                 Containerfile, entrypoint, run (dyalogscript wrapper), nsjail.cfg, seccomp policy
-web/                   TIO frontend (adapted), languages.json, abrudz/lb
+web/                   TIO frontend (adapted), abrudz/lb, fonts
 test/integration/      black-box HTTP tests against a running container
 test/ui/               Playwright tests against a running container
 scripts/               smoke (end-to-end check against a URL)
@@ -172,7 +175,7 @@ deploy/                setup-host, compose.yaml, Caddyfile, update timer and ser
 THIRD_PARTY_NOTICES
 ```
 
-Go 1.24 with standard library HTTP. Linters: `gofmt`, `go vet`, `staticcheck` for Go; `shellcheck` for shell scripts. Node 20 for the UI tests.
+Go 1.27 with standard library HTTP. Linters: `gofmt`, `go vet`, `staticcheck` for Go; `shellcheck` for shell scripts. Node 26 for the UI tests.
 
 ## Work breakdown
 

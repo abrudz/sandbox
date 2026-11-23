@@ -514,7 +514,7 @@ test("bold text has normal weight, a text stroke and letter spacing; plain text 
   const bold = { "error title": await emphasis(page, "#messages .message:visible h4") };
   await page.goto("/");
   await expect(page.locator("#interpreter")).toBeVisible();
-  for (const selector of ["#interpreter h2", "#interpreter h3", ".array-add span"])
+  for (const selector of ["#lang-name", "#lang-example span", "#interpreter h3", ".array-add span"])
     bold[selector] = await emphasis(page, selector);
 
   for (const [name, style] of Object.entries(bold)) {

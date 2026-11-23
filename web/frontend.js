@@ -3,10 +3,12 @@
 // output helpers are in codec.js; lb.js provides the APL language bar.
 
 var bodyWidth = document.body.clientWidth;
-var defaultLanguage = "apl-dyalog";
-var languageId;
-var languages;
-var languagesURL = "/languages.json";
+// The page's one language: its id in permalinks, its name and link in the
+// copy formats, and its Hello World program.
+var languageId = "apl-dyalog";
+var languageName = "Dyalog APL";
+var languageLink = "https://www.dyalog.com/";
+var helloWorld = "⎕←'Hello, World!'";
 var navHeight = 48;
 var runOnLoad = true;
 var rEscapees = /[\x00-\x09\x0b-\x1f\x7f-\x9f&<>]| $/gm;
@@ -16,7 +18,6 @@ var rSurroundingLinefeed = /^\n|\n$/;
 var rUnpairedSurrogates = /[\ud800-\udbff](?![\udc00-\udfff])|([^\ud800-\udbff]|^)[\udc00-\udfff]/;
 var rUnicodeCharacters = /[^][\udc00-\udfff]?/g;
 var rUnprintable = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
-var rXxdLastLine = /(\w+):(.*?)\s\s.*$/;
 var runController;
 // runTimeoutMs is the server's wall-clock limit of one run, from
 // /api/v1/version; until that arrives, or if it fails, the server's default.
@@ -86,7 +87,10 @@ function runRequestBody() {
 	var code = ($("#header").value && $("#header").value + "\n") + $("#code").value + ($("#footer").value && "\n" + $("#footer").value);
 	var args = [];
 	iterate($$("#cla-wrapper textarea"), function(textArea) { args.push(textArea.value); });
-	return JSON.stringify({code: code, input: $("#input").value, args: args});
+	// A line break ends the input's last line, so that reading it does not
+	// end in EOF INTERRUPT. It is added even after a line break, which may
+	// be meant to answer a prompt with an empty line.
+	return JSON.stringify({code: code, input: $("#input").value + "\n", args: args});
 }
 
 // timingLines returns what TIO appended to the debug output: bash's time
@@ -423,12 +427,13 @@ function clearState() {
 	});
 }
 
+// hashToState shows the state in a permalink, and returns the permalink's
+// language, or undefined if the permalink cannot be decoded.
 function hashToState(hash) {
 	if (/=/.test(hash)) {
 		// TIO's first permalink format: language#code=…&input=…&args=…
 		clearState();
 		var hashArray = hash.split("#");
-		languageId = hashArray[0];
 		var fields = hashArray[1].split("&");
 		for (var i = 0; i < fields.length; i++) {
 			var field = fields[i].split("=");
@@ -443,13 +448,12 @@ function hashToState(hash) {
 				textToTextArea(byteStringToText(base64ToByteString(field[1])), element);
 			}
 		}
-		return true;
+		return hashArray[0];
 	}
 	try {
 		var permalink = parsePermalink(hash);
-		languageId = permalink.language;
 		if (!permalink.fields)
-			return true;
+			return permalink.language;
 		var fieldArray = permalink.fields;
 		clearState();
 		textToTextArea(fieldArray[1] || "", $("#header"));
@@ -460,27 +464,18 @@ function hashToState(hash) {
 	} catch(error) {
 		console.error(error);
 		sendMessage("Error", "The permalink could not be decoded.");
-		$("#toggle-index").checked = true;
-		return false;
+		$("#toggle-interpreter").checked = false;
+		return undefined;
 	}
-	return true;
+	return permalink.language;
 }
 
-function countBytes(string, encoding) {
-	if (string === "")
-		return 0;
-	if (encoding == "SBCS")
-		return string.match(rUnicodeCharacters).length;
-	if (encoding == "UTF-8")
-		return textToByteString(string).length;
-	if (encoding == "nibbles")
-		return Math.ceil(string.match(rUnicodeCharacters).length / 2);
-	if (encoding == "xxd") {
-		var fields = string.match(rXxdLastLine);
-		if (!fields)
-			return 0;
-		return Number("0x" + fields[1]) + fields[2].match(/\S\S/g).length;
-	}
+function countCharacters(string) {
+	return string === "" ? 0 : string.match(rUnicodeCharacters).length;
+}
+
+function countBytes(string) {
+	return textToByteString(string).length;
 }
 
 function clearMessages() {
@@ -501,17 +496,10 @@ function postStateFill() {
 		setTimeout(function() { $("#code").focus(); }, 10);
 }
 
-function testToState(test) {
+function showHelloWorld() {
 	saveState();
 	clearState();
-	iterate(languages[languageId].tests[test].request, function(instruction) {
-		for (var key in instruction.payload)
-			var name = key, value = instruction.payload[key];
-		if (instruction.command == "F")
-			$(name == ".code.tio" ? "#code" : "#input").value = value;
-		else if (instruction.command == "V")
-			fieldArrayToState(value, $("#cla-wrapper"));
-	});
+	$("#code").value = helloWorld;
 	saveState(true);
 	postStateFill();
 }
@@ -530,19 +518,16 @@ function init() {
 	var permalink = hash.indexOf("#") >= 0;
 	// tio.run's own pages: an empty fragment, its home page and its language list.
 	if (/^(|community|home|get-started)$/.test(hash))
-		hash = defaultLanguage;
-	if (!hashToState(hash))
+		hash = languageId;
+	var language = hashToState(hash);
+	if (language === undefined)
 		return;
-	var language = languages[languageId];
-	if (!language) {
-		$("#toggle-index").checked = true;
-		sendMessage("Error", "The requested language could not be found. This may be due to caching; try a hard refresh.");
-		languageId = undefined;
+	if (language != languageId) {
+		$("#toggle-interpreter").checked = false;
+		sendMessage("Error", "The requested language could not be found.");
 		return;
 	}
 	$("#toggle-interpreter").checked = true;
-	$("#lang-link").href = language.link;
-	$("#lang-name").textContent = language.name;
 	postStateFill();
 	scrollTo(0, 0);
 	if (runProgram && permalink && ($("#header").value || $("#code").value || $("#footer").value))
@@ -575,8 +560,10 @@ function codeToMarkdown(code) {
 		return code.replace(rNewLine, "    ");
 }
 
+// saveState records the program in the history; it does nothing while the
+// interpreter is not shown, as for another language's permalink.
 function saveState(saveIfEmpty) {
-	if (!languageId)
+	if (!$("#toggle-interpreter").checked)
 		return;
 	var fields = [languageId, $("#header").value, $("#code").value, $("#footer").value, $("#input").value];
 	iterate($$("#cla-wrapper textarea"), function(textArea) { fields.push(textArea.value); });
@@ -641,14 +628,13 @@ function boot() {
 
 	$("#permalink").onclick = function() {
 		var code = $("#code").value;
-		var language = languages[languageId];
 		saveState(true);
 		var data = {
-			"bytes": pluralization(countBytes(code, language.encoding), "byte"),
+			"bytes": pluralization(countBytes(code), "byte"),
 			"markdownCode": codeToMarkdown(code),
-			"prettifyHint": language.prettify ? "<!-- language-all: lang-" + language.prettify + " -->\n\n" : "",
-			"lang": language.name,
-			"link": language.link,
+			"prettifyHint": "<!-- language-all: lang-apl -->\n\n",
+			"lang": languageName,
+			"link": languageLink,
 			"n": "\n",
 			"nn": "\n\n",
 			"permalink": location.href,
@@ -664,22 +650,17 @@ function boot() {
 		}
 	};
 
-	$("#lang-example").onclick = function() { testToState("helloWorld"); };
+	$("#lang-example").onclick = showHelloWorld;
 
 	$("#code").oninput = function() {
 		var code = $("#code").value;
-		var encoding = languages[languageId].encoding;
 
 		resize($("#code"));
 
 		if (rUnpairedSurrogates.test(code))
 			return $("#code-info").textContent = "invalid Unicode: unpaired surrogates";
 
-		var characterCount = countBytes(code, "SBCS");
-		var byteCount = countBytes(code, encoding);
-
-		$("#code-info").textContent  = pluralization(characterCount, "char");
-		$("#code-info").textContent += ", " + pluralization(byteCount, "byte") + " (" + encoding + ")";
+		$("#code-info").textContent = pluralization(countCharacters(code), "char") + ", " + pluralization(countBytes(code), "byte") + " (UTF-8)";
 	};
 
 	fetch(versionURL).then(function(response) {
@@ -761,7 +742,7 @@ function boot() {
 				return;
 			event.preventDefault();
 			if (event.target.classList.contains("read-only") == false)
-				typeString(languages[languageId].tab || "\t", event);
+				typeString("\t");
 		}
 		else if (modifiers(event) == 1 && event.keyCode == 9) {
 			event.preventDefault();
@@ -780,13 +761,5 @@ function boot() {
 	layoutLanguageBar();
 }
 
-fetch(languagesURL).then(function(response) {
-	return response.json();
-}).then(function(json) {
-	languages = json;
-	boot();
-	init();
-}).catch(function(error) {
-	console.error(error);
-	sendMessage("Error", "Some resources could not be loaded. Please refresh the page and try again.");
-});
+boot();
+init();

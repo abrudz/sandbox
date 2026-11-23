@@ -28,8 +28,8 @@ jobs:
       SANDBOX_CONTAINER: sandbox-ci
       SANDBOX_URL: http://127.0.0.1:8000
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -58,10 +58,10 @@ jobs:
       - name: Integration tests
         run: go test -tags integration -count=1 -v ./test/integration/...
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: ${{ !cancelled() }}
         with:
-          node-version: 20
+          node-version: 26
           cache: npm
           cache-dependency-path: test/ui/package-lock.json
 
