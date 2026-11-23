@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -135,6 +136,21 @@ func TestNothingRemainsAfterATimedOutRun(t *testing.T) {
 	}
 	if left := leftovers(t, container); len(left) > 0 {
 		t.Errorf("a timed-out run left %q", left)
+	}
+}
+
+func TestVersionReportsTheWallClockLimitSetBySandboxTimeout(t *testing.T) {
+	url, _ := startContainer(t, "SANDBOX_TIMEOUT=2s")
+
+	var v struct {
+		TimeoutMs *int64 `json:"timeoutMs"`
+	}
+	data := requestAt(t, url, http.MethodGet, "/api/v1/version", nil)
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatalf("GET /api/v1/version: response is not JSON: %v\n%s", err, data)
+	}
+	if v.TimeoutMs == nil || *v.TimeoutMs != 2000 {
+		t.Errorf("GET /api/v1/version: timeoutMs is not 2000 with SANDBOX_TIMEOUT=2s: %s", data)
 	}
 }
 

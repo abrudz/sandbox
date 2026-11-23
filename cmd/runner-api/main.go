@@ -69,6 +69,7 @@ func main() {
 		WebDir:            webDir,
 		ImageDigest:       imageDigest,
 		Commit:            commit,
+		Timeout:           limits.Timeout,
 	})
 	srv := &http.Server{
 		Addr:              ":8080",

@@ -18,6 +18,12 @@ var rUnicodeCharacters = /[^][\udc00-\udfff]?/g;
 var rUnprintable = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
 var rXxdLastLine = /(\w+):(.*?)\s\s.*$/;
 var runController;
+// runTimeoutMs is the server's wall-clock limit of one run, from
+// /api/v1/version; until that arrives, or if it fails, the server's default.
+var runTimeoutMs = 10000;
+// responseMarginMs is how long past the run time limit a run's response may
+// take: the sandbox's start-up and clean-up, the proxy and the network.
+var responseMarginMs = 10000;
 var runURL = "/api/v1/run";
 var savedFocus;
 var touchDevice = navigator.MaxTouchPoints > 0 || window.ontouchstart !== undefined;
@@ -301,8 +307,44 @@ function setRunning(running) {
 	}
 }
 
+// runResult returns the run result in a 200 response's body, or undefined
+// when the body is not one, such as a proxy's page or a body cut short.
+function runResult(body) {
+	var result;
+	try {
+		result = JSON.parse(body);
+	} catch (error) {
+		return undefined;
+	}
+	if (result !== null && typeof result == "object" &&
+		typeof result.stdout == "string" && typeof result.stderr == "string" &&
+		(result.exitCode === null || typeof result.exitCode == "number") &&
+		(result.signal === null || typeof result.signal == "string") &&
+		typeof result.wallTimeMs == "number" && typeof result.userTimeMs == "number" && typeof result.sysTimeMs == "number")
+		return result;
+}
+
+// errorReason returns the text shown for an error status. The server sends
+// its reason as plain text; any other body, such as a proxy's error page,
+// is not shown, and HTTP/2 has no status text to fall back on.
+function errorReason(response, body) {
+	if (/^text\/plain\b/i.test(response.headers.get("Content-Type") || "") && body.trim())
+		return body.trim();
+	return "The server could not run the program.";
+}
+
+// failRun reports a run that produced no result. Output and Debug are
+// emptied, so that a previous run's results are not taken for this one's.
+function failRun(title, text) {
+	sendMessage(title, text);
+	textToTextArea("", $("#output"));
+	textToTextArea("", $("#debug"));
+}
+
 // run sends the program to the run API. While a run is in progress, the
 // Run button cancels it: aborting the request makes the server stop it.
+// A run whose response has not arrived once the run time limit and the
+// margin have passed is aborted the same way and reported as a failure.
 function run() {
 	if (runController) {
 		runController.abort();
@@ -311,6 +353,21 @@ function run() {
 	clearMessages();
 	setRunning(true);
 	var controller = runController = new AbortController();
+	var started = performance.now();
+	var expired = false;
+	var deadline;
+	// The limit can arrive from /api/v1/version after the run has started,
+	// so the timer checks the deadline again when it fires.
+	function expire() {
+		var remaining = started + runTimeoutMs + responseMarginMs - performance.now();
+		if (remaining > 0) {
+			deadline = setTimeout(expire, remaining);
+			return;
+		}
+		expired = true;
+		controller.abort();
+	}
+	deadline = setTimeout(expire, runTimeoutMs + responseMarginMs);
 	fetch(runURL, {
 		method: "POST",
 		headers: {"Content-Type": "application/json"},
@@ -319,13 +376,19 @@ function run() {
 	}).then(function(response) {
 		return response.text().then(function(body) {
 			if (response.status != 200)
-				return sendMessage("Error " + response.status, body.trim() || response.statusText);
-			showResult(JSON.parse(body));
+				return failRun("Error " + response.status, errorReason(response, body));
+			var result = runResult(body);
+			if (!result)
+				return failRun("Error", "The server's response could not be read.");
+			showResult(result);
 		});
 	}).catch(function(error) {
-		if (error.name != "AbortError")
-			sendMessage("Error", "Could not establish or maintain a connection with the server.");
+		if (expired)
+			failRun("Error", "The server did not respond in time.");
+		else if (error.name != "AbortError")
+			failRun("Error", "Could not establish or maintain a connection with the server.");
 	}).then(function() {
+		clearTimeout(deadline);
 		if (runController === controller)
 			runController = undefined;
 		setRunning(false);
@@ -623,6 +686,8 @@ function boot() {
 		return response.json();
 	}).then(function(version) {
 		$("#lang-version").textContent = version.dyalogVersion;
+		if (typeof version.timeoutMs == "number" && version.timeoutMs > 0)
+			runTimeoutMs = version.timeoutMs;
 	}).catch(function(error) {
 		console.error(error);
 	});

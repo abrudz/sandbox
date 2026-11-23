@@ -46,7 +46,7 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 ### API
 
 - `POST /api/v1/run` with `{"code": "⎕←2+2", "input": "", "args": []}` runs the program and answers with its `stdout`, `stderr`, `exitCode`, `signal`, `timedOut`, whether each output was truncated, its wall, user and system time, and `dyalogVersion`.
-- `GET /api/v1/version` answers with `dyalogVersion`, `imageDigest` (the digest of the `dyalog/dyalog` image the image was built from) and `commit`.
+- `GET /api/v1/version` answers with `dyalogVersion`, `imageDigest` (the digest of the `dyalog/dyalog` image the image was built from), `commit`, and `timeoutMs`, the wall-clock limit of one run.
 - `GET /healthz` answers 200 while the service is serving.
 
 The plan, [docs/plans/dyalog-runner.md](docs/plans/dyalog-runner.md), describes the contract in full.
