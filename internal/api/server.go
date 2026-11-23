@@ -45,6 +45,9 @@ type Options struct {
 	ImageDigest string
 	// Commit is the commit of this repository the image was built from.
 	Commit string
+	// Timeout is the wall-clock limit of one run, enforced by the
+	// executor.
+	Timeout time.Duration
 }
 
 // Server is the runner's HTTP handler.

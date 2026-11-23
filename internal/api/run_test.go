@@ -142,6 +142,17 @@ func TestGetVersionReportsTheUpstreamDigestAndCommit(t *testing.T) {
 	}
 }
 
+func TestGetVersionReportsTheRunTimeLimitInMilliseconds(t *testing.T) {
+	h := api.NewHandler(api.Options{Executor: &fakeExecutor{}, DyalogVersion: version, Timeout: 7 * time.Second})
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+
+	if got := decode(t, rec)["timeoutMs"]; got != float64(7000) {
+		t.Fatalf("timeoutMs %v, want 7000", got)
+	}
+}
+
 func TestGetVersionReportsTheDyalogVersion(t *testing.T) {
 	h := api.NewHandler(api.Options{Executor: &fakeExecutor{}, DyalogVersion: version})
 	rec := httptest.NewRecorder()

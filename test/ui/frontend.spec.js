@@ -291,3 +291,109 @@ test("the page makes no requests to any origin other than its own", async ({ pag
 
   expect(foreign).toEqual([]);
 });
+
+// errorMessage returns the visible message whose title is the given text.
+function errorMessage(page, title) {
+  return page.locator("#messages .message:visible")
+    .filter({ has: page.locator("h4", { hasText: new RegExp(`^${title}$`) }) });
+}
+
+test("a run whose request gets no response ends with an error once the server's time limit and a margin have passed", async ({ page }) => {
+  await page.route("**/api/v1/version", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), timeoutMs: 2000 } });
+  });
+  await page.route("**/api/v1/run", () => {});
+  await page.goto("/");
+  await expect(page.locator("#lang-version")).not.toBeEmpty();
+  await page.fill("#code", "⎕←2+2");
+  await page.waitForTimeout(500);
+  const idle = await runButton(page);
+
+  await page.locator("#code").press("Control+Enter");
+
+  await page.waitForTimeout(2000 + 5000);
+  await expect(page.locator("#run")).toHaveClass(/running/);
+  await expect(errorMessage(page, "Error")).toContainText("did not respond", { timeout: 8_000 });
+  await expect(page.locator("#run")).not.toHaveClass(/running/);
+  await expect.poll(async () => (await runButton(page)).equals(idle), { timeout: 3_000 }).toBe(true);
+});
+
+for (const [kind, body] of [
+  ["not JSON", "<html><body>Welcome</body></html>"],
+  ["cut short", '{"stdout":"4\\n","stderr":"","exitCo'],
+  ["JSON but not a run result", '{"status":"ok"}'],
+])
+  test(`a 200 response that is ${kind} ends the run with an error saying the response could not be read`, async ({ page }) => {
+    await page.route("**/api/v1/run", route => route.fulfill({ status: 200, contentType: "application/json", body }));
+    await page.goto("/");
+    await page.fill("#code", "⎕←2+2");
+
+    await page.locator("#code").press("Control+Enter");
+
+    await expect(errorMessage(page, "Error")).toContainText("response could not be read");
+    await expect(page.locator("#run")).not.toHaveClass(/running/);
+  });
+
+for (const [kind, contentType, body] of [
+  ["an empty body", "text/plain", ""],
+  ["an HTML page", "text/html", "<html><body><h1>502 Bad Gateway</h1></body></html>"],
+])
+  test(`an error status with ${kind} shows the status and a description without markup`, async ({ page }) => {
+    await page.route("**/api/v1/run", route => route.fulfill({ status: 502, contentType, body }));
+    await page.goto("/");
+    await page.fill("#code", "⎕←2+2");
+
+    await page.locator("#code").press("Control+Enter");
+
+    await expect(errorMessage(page, "Error 502").locator("div")).toHaveText("The server could not run the program.");
+  });
+
+test("an error status with a plain-text reason shows the status and the reason", async ({ page }) => {
+  await page.route("**/api/v1/run", route => route.fulfill({ status: 429, contentType: "text/plain; charset=utf-8", body: "every run slot is busy\n" }));
+  await page.goto("/");
+  await page.fill("#code", "⎕←2+2");
+
+  await page.locator("#code").press("Control+Enter");
+
+  await expect(errorMessage(page, "Error 429").locator("div")).toHaveText("every run slot is busy");
+});
+
+for (const [kind, answer] of [
+  ["an unreadable response", route => route.fulfill({ status: 200, contentType: "application/json", body: "garbage" })],
+  ["an error status", route => route.fulfill({ status: 429, contentType: "text/plain", body: "every run slot is busy" })],
+  ["a connection failure", route => route.abort("connectionreset")],
+])
+  test(`after a run that ends with ${kind}, Output and Debug no longer show the previous run's results`, async ({ page }) => {
+    await page.goto("/");
+    await page.fill("#code", "⎕←2+2\n1÷0");
+    await page.locator("#code").press("Control+Enter");
+    await expect(page.locator("#output")).toHaveValue("4\n");
+    await expect(page.locator("#debug")).toHaveValue(/DOMAIN ERROR/);
+    await page.route("**/api/v1/run", answer);
+
+    await page.locator("#code").press("Control+Enter");
+
+    await expect(page.locator("#messages .message:visible h4", { hasText: /^Error/ })).toHaveCount(1);
+    await expect(page.locator("#output")).toHaveValue("");
+    await expect(page.locator("#debug")).toHaveValue("");
+  });
+
+test("a run the user cancels leaves Output and Debug as they were", async ({ page }) => {
+  await page.goto("/");
+  await page.fill("#code", "⎕←2+2\n1÷0");
+  await page.locator("#code").press("Control+Enter");
+  await expect(page.locator("#output")).toHaveValue("4\n");
+  await expect(page.locator("#debug")).toHaveValue(/DOMAIN ERROR/);
+  const debug = await page.locator("#debug").inputValue();
+  await page.fill("#code", "⎕DL 30");
+  await page.locator("#code").press("Control+Enter");
+  await expect(page.locator("#run")).toHaveClass(/running/);
+  await page.waitForTimeout(500);
+
+  await page.click("#run");
+
+  await expect(page.locator("#run")).not.toHaveClass(/running/);
+  await expect(page.locator("#output")).toHaveValue("4\n");
+  await expect(page.locator("#debug")).toHaveValue(debug);
+});
