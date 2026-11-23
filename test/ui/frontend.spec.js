@@ -438,8 +438,8 @@ test("opening a permalink whose input has no final line break reads that input a
 
 for (const [kind, input, sent] of [
   ["without a final line break is sent with one", "a\nb", "a\nb\n"],
-  ["that ends with a line break is sent unchanged", "a\nb\n", "a\nb\n"],
-  ["that is empty is sent empty", "", ""],
+  ["that ends with a line break is sent with another, so that its last line is empty", "a\nb\n", "a\nb\n\n"],
+  ["that is empty is sent as one empty line", "", "\n"],
 ])
   test(`input ${kind}`, async ({ page }) => {
     const bodies = [];
@@ -460,6 +460,18 @@ for (const [kind, input, sent] of [
     expect(bodies[0].input).toBe(sent);
     await expect(page.locator("#input")).toHaveValue(input);
   });
+
+test("a line break at the end of Input answers a prompt with an empty line", async ({ page }) => {
+  await page.goto("/");
+  await page.fill("#code", "⎕←⍞\n⎕←'[',⍞,']'");
+  await openSection(page, "input");
+  await page.fill("#input", "a\n");
+
+  await page.locator("#code").press("Control+Enter");
+
+  await expect(page.locator("#output")).toHaveValue("a\n[]\n");
+  await expect(page.locator("#debug")).not.toHaveValue(/EOF INTERRUPT/);
+});
 
 test("the page's styles all come from its stylesheet", async ({ page }) => {
   await page.goto("/");
