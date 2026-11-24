@@ -77,8 +77,14 @@ func TestRunSetsAConfigurationParameterFromANameValueArgument(t *testing.T) {
 	assertLines(t, r.Stdout, "bar")
 }
 
+func TestRunAppliesAConfigurationParameterThatTheInterpreterReadsAtStartup(t *testing.T) {
+	r := run(t, "⎕←⎕IO\n", "", "DEFAULT_IO=0")
+
+	assertLines(t, r.Stdout, "0")
+}
+
 func TestRunKeepsAConfigurationParameterValueAsGiven(t *testing.T) {
-	value := `a  b 'c' "d" =e \f $HOME;` + "`id`" + ` *`
+	value := `~/a  b 'c' "d" =e \f $HOME;` + "`id`" + ` *`
 
 	r := run(t, "⎕←2⎕NQ#'GetEnvironment' 'FOO'\n", "", "FOO="+value)
 
@@ -92,10 +98,9 @@ func TestRunPassesOnlyArgumentsOtherThanNameValueToTheProgram(t *testing.T) {
 	assertLines(t, r.Stdout, "0", "x y", "-z", "1=2", "=e")
 }
 
-func TestRunKeepsTheServicesWorkspaceSizeWhenAnArgumentSetsMAXWS(t *testing.T) {
-	// The service sets MAXWS to half the memory limit, 256 MiB by default;
-	// 64M would leave less than 128 MB.
-	r := run(t, "⎕←⎕WA>128E6\n", "", "MAXWS=64M")
+func TestRunSetsTheWorkspaceSizeFromAMAXWSArgument(t *testing.T) {
+	// The service's MAXWS, half the memory limit, is 256 MiB by default.
+	r := run(t, "⎕←⎕WA<128E6\n", "", "MAXWS=64M")
 
 	assertLines(t, r.Stdout, "1")
 }
