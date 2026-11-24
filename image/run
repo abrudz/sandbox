@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Entry point of every jailed run. /job/code holds the program, standard
-# input carries its input, and the arguments are passed on to the program.
+# input carries its input, and the arguments are the run's arguments: each
+# NAME=value is a configuration parameter, as on the interpreter's command
+# line, and every other argument is passed on to the program.
 
 set -euo pipefail
 
@@ -12,6 +14,32 @@ if [[ -s $script && -n $(tail -c 1 "$script") ]]; then
   echo >> "$script"
 fi
 
-# Dyalog applies MAXWS given on dyalogscript's command line, before the
-# script; in script mode the environment variable alone has no effect.
-exec dyalogscript ${MAXWS:+"MAXWS=$MAXWS"} "$script" "$@"
+# Configuration parameters take effect in script mode only on
+# dyalogscript's command line, before the script; the environment has no
+# effect on MAXWS, and the #! line none unless the script is executed as a
+# program. dyalogscript expands the parameters unquoted and then evaluates
+# them, which splits the single argument a #! line yields. Each value is
+# therefore passed as ANSI-C hexadecimal escapes, which hold no whitespace,
+# pattern characters or tilde, and which that evaluation turns back into
+# the value.
+params=()
+args=()
+for arg in "$@"; do
+  if [[ $arg =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    value=${arg#*=}
+    escaped=
+    if [[ -n $value ]]; then
+      # od prints only hexadecimal digits and spaces, so the unquoted
+      # expansion splits into one word per byte.
+      # shellcheck disable=SC2046
+      printf -v escaped '\\x%s' $(printf %s "$value" | od -An -v -tx1)
+    fi
+    params+=("${arg%%=*}=\$'$escaped'")
+  else
+    args+=("$arg")
+  fi
+done
+
+# The interpreter takes the first value of a parameter given twice, so a
+# run's own MAXWS replaces the service's.
+exec dyalogscript "${params[@]}" ${MAXWS:+"MAXWS=$MAXWS"} "$script" "${args[@]}"
