@@ -145,7 +145,7 @@ Added:
 - APL glyph input through `abrudz/lb`: a language bar and backtick key bindings.
 - The Dyalog version, from `/api/v1/version`, in the language heading.
 - An APL Wiki button at the right end of the toolbar (hotkey W), which opens the APL Wiki in a new tab.
-- A favicon showing the Run button's logo in colours that follow the browser's theme. It turns with the button while a run is in progress, also in a hidden tab, where a timer turns it.
+- A favicon showing the Run button's logo in colours that follow the browser's theme.
 
 ### Publishing and updates
 
