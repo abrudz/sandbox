@@ -111,6 +111,8 @@ install_file "$env_file" "$dir/.env" 644
 install_file "$here/compose.yaml" "$dir/compose.yaml" 644
 install_file "$here/Caddyfile" "$dir/Caddyfile" 644
 caddyfile_changed=$copied
+install_file "$here/seccomp.json" "$dir/seccomp.json" 644
+seccomp_changed=$copied
 
 # The daily update.
 units_changed=false
@@ -135,7 +137,8 @@ elif $units_changed; then
 fi
 
 # The instance. Compose replaces only the containers whose configuration or
-# image has changed; Caddy reads a changed Caddyfile on a restart.
+# image has changed; Caddy reads a changed Caddyfile on a restart, and
+# Docker reads the seccomp profile only when it creates the container.
 before=$("${compose[@]}" ps -q | sort)
 "${compose[@]}" up -d --remove-orphans
 after=$("${compose[@]}" ps -q | sort)
@@ -146,6 +149,11 @@ caddy=$("${compose[@]}" ps -q caddy)
 if $caddyfile_changed && [ -n "$caddy" ] && grep -qx "$caddy" <<<"$before"; then
 	"${compose[@]}" restart caddy
 	changed "restarted Caddy for the new Caddyfile"
+fi
+sandbox=$("${compose[@]}" ps -q sandbox)
+if $seccomp_changed && [ -n "$sandbox" ] && grep -qx "$sandbox" <<<"$before"; then
+	"${compose[@]}" up -d --force-recreate sandbox
+	changed "recreated the sandbox container for the new seccomp profile"
 fi
 
 if [ "$changes" -eq 0 ]; then

@@ -161,7 +161,7 @@ Added:
 ### Deployments
 
 - **Local instance:** any machine with Docker and cgroup v2, including WSL2 with Docker Desktop or Docker Engine. The `docker run` command in Context publishes the port on `127.0.0.1` only, so the instance is reachable from that machine alone.
-- **Public instance:** a dedicated Ubuntu 24.04 VM that holds no secrets. `deploy/compose.yaml` runs the sandbox container and Caddy, which obtains the TLS certificate for `dyalog.run` and proxies to the container. `runner-api` trusts `X-Forwarded-For` only from Caddy, for per-client limits. The inbound firewall allows 22, 80 and 443 only, and unattended security upgrades keep the kernel patched.
+- **Public instance:** a dedicated Ubuntu 24.04 VM that holds no secrets. `deploy/compose.yaml` runs the sandbox container, with the flags in Context, and Caddy, which obtains the TLS certificate for `dyalog.run` and proxies to the container. `runner-api` trusts `X-Forwarded-For` only from Caddy, for per-client limits. The inbound firewall allows 22, 80 and 443 only, and unattended security upgrades keep the kernel patched.
 
 ### Repository layout
 

@@ -128,6 +128,10 @@ type hostConfig struct {
 	Privileged  bool
 	CapAdd      []string
 	SecurityOpt []string
+	// systempaths=unconfined leaves these empty; without it, Docker fills
+	// in its default lists, and a privileged container has none (null).
+	MaskedPaths   *[]string
+	ReadonlyPaths *[]string
 }
 
 func sandboxHostConfig(t *testing.T) hostConfig {
@@ -155,9 +159,15 @@ func TestSandboxContainerIsNotPrivilegedAndAddsOnlySysAdmin(t *testing.T) {
 func TestSandboxContainerUnconfinesAppArmorAndMaskedPathsAndUsesTheSeccompProfile(t *testing.T) {
 	hc := sandboxHostConfig(t)
 
-	for _, want := range []string{"apparmor=unconfined", "systempaths=unconfined"} {
-		if !slices.Contains(hc.SecurityOpt, want) {
-			t.Errorf("the sandbox container's security options %q lack %s", hc.SecurityOpt, want)
+	if !slices.Contains(hc.SecurityOpt, "apparmor=unconfined") {
+		t.Errorf("the sandbox container's security options %q lack apparmor=unconfined", hc.SecurityOpt)
+	}
+	for name, paths := range map[string]*[]string{"masked": hc.MaskedPaths, "read-only": hc.ReadonlyPaths} {
+		switch {
+		case paths == nil:
+			t.Errorf("the sandbox container has no %s paths list, so systempaths=unconfined is not set", name)
+		case len(*paths) > 0:
+			t.Errorf("the sandbox container has %s paths %q, so systempaths=unconfined is not set", name, *paths)
 		}
 	}
 	// Docker keeps a seccomp profile in the container's configuration as
