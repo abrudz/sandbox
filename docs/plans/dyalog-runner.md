@@ -56,16 +56,17 @@ The public instance puts Caddy in front of the container for TLS.
 
 ### Execution semantics
 
-`image/run` copies the code into the jail's home directory as a script file, appending a final newline when the code lacks one (`dyalogscript` ignores an unterminated last line). It then runs `dyalogscript <script> <args...>` with the input on stdin. Observed with Dyalog 20.0 locally; item 2 confirms each point on the current image:
+`image/run` copies the code into the jail's home directory as a script file, appending a final newline when the code lacks one (`dyalogscript` ignores an unterminated last line). It then runs `dyalogscript <parameters...> <script> <args...>` with the input on stdin, where the parameters are the arguments of the form `NAME=value` and the args are the rest. Observed with Dyalog 20.0 locally, configuration parameters take effect in script mode only there: the environment has no effect on `MAXWS`, and a `#!` line none unless the script is executed as a program. `dyalogscript` expands the parameters unquoted and evaluates them, so each value is passed as ANSI-C hexadecimal escapes, which that evaluation turns back into the value. Observed with Dyalog 20.0 locally; item 2 confirms each point on the current image:
 
 - Statements run in order as a Dyalog script; multi-line dfns are allowed.
 - `⍞` and `⎕` read successive lines of the input.
 - `⎕PW` is 32767, so wide results are not wrapped.
 - An untrapped error writes the error message to stderr, stops the script and ends the run with a non-zero exit status (4 in Dyalog 20.0).
 - `⎕OFF n` ends the run with exit status `n`.
-- `2⎕NQ#'GetCommandLineArgs'` returns the script name followed by the arguments.
+- `2⎕NQ#'GetCommandLineArgs'` returns the script name followed by the arguments that are not `NAME=value`.
+- An argument `NAME=value` sets the configuration parameter `NAME`, as on TIO, which passes the arguments to the interpreter's command line. `2⎕NQ#'GetEnvironment' 'NAME'` returns it, and parameters read at startup, such as `DEFAULT_IO`, take effect. Dyalog 20.0 does not keep non-ASCII characters in a parameter given on the command line.
 - Output lines end with CR.
-- `MAXWS` is set below the memory limit, so APL reports `WS FULL` before the cgroup limit is reached.
+- `MAXWS` is set below the memory limit, so APL reports `WS FULL` before the cgroup limit is reached. A `MAXWS` argument replaces it, because the interpreter takes the first value of a parameter given twice and the run's parameters come first.
 
 Programs that rely on TIO's own wrapper (code fixed as a namespace script, unread input lines executed as statements) can behave differently here.
 
@@ -197,6 +198,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 - `1÷0` writes the `DOMAIN ERROR` message to stderr, later lines do not run, and the exit status is non-zero.
 - `⎕OFF n` ends with exit status `n`.
 - The arguments are visible through `2⎕NQ#'GetCommandLineArgs'`.
+- An argument `NAME=value` sets the configuration parameter `NAME`, keeping its value exactly; parameters read at startup and `MAXWS` take effect; such arguments are not program arguments.
 - Code whose last line has no trailing newline still runs that line.
 - stderr never repeats what was written to stdout.
 - The response reports wall, user and system time.

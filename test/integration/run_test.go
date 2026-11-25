@@ -71,6 +71,40 @@ func TestRunPassesArgumentsToTheProgram(t *testing.T) {
 	assertLines(t, r.Stdout, "foo", "bar baz")
 }
 
+func TestRunSetsAConfigurationParameterFromANameValueArgument(t *testing.T) {
+	r := run(t, "⎕←2⎕NQ#'GetEnvironment' 'FOO'\n", "", "FOO=bar")
+
+	assertLines(t, r.Stdout, "bar")
+}
+
+func TestRunAppliesAConfigurationParameterThatTheInterpreterReadsAtStartup(t *testing.T) {
+	r := run(t, "⎕←⎕IO\n", "", "DEFAULT_IO=0")
+
+	assertLines(t, r.Stdout, "0")
+}
+
+func TestRunKeepsAConfigurationParameterValueAsGiven(t *testing.T) {
+	value := `~/a  b 'c' "d" =e \f $HOME;` + "`id`" + ` *`
+
+	r := run(t, "⎕←2⎕NQ#'GetEnvironment' 'FOO'\n", "", "FOO="+value)
+
+	assertLines(t, r.Stdout, value)
+}
+
+func TestRunPassesOnlyArgumentsOtherThanNameValueToTheProgram(t *testing.T) {
+	r := run(t, "args←2⎕NQ#'GetCommandLineArgs'\n⎕←(⊂'FOO=bar')∊args\n{⎕←⍵}¨¯4↑args\n", "",
+		"x y", "FOO=bar", "-z", "1=2", "=e")
+
+	assertLines(t, r.Stdout, "0", "x y", "-z", "1=2", "=e")
+}
+
+func TestRunSetsTheWorkspaceSizeFromAMAXWSArgument(t *testing.T) {
+	// The service's MAXWS, half the memory limit, is 256 MiB by default.
+	r := run(t, "⎕←⎕WA<128E6\n", "", "MAXWS=64M")
+
+	assertLines(t, r.Stdout, "1")
+}
+
 func TestRunExecutesALastLineWithoutANewline(t *testing.T) {
 	r := run(t, "⎕←'first'\n⎕←'last'", "")
 
