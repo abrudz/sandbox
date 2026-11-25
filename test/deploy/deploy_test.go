@@ -338,6 +338,28 @@ func readFile(t *testing.T, path string) []byte {
 	return b
 }
 
+func TestNoCrashStartsAHelperOnTheHost(t *testing.T) {
+	// The configuration the host applies at boot, before any service.
+	command(t, "sysctl", "--system")
+
+	if pattern := command(t, "sysctl", "-n", "kernel.core_pattern"); strings.HasPrefix(pattern, "|") {
+		t.Errorf("kernel.core_pattern is %q, which pipes every crash to a helper on the host", pattern)
+	}
+}
+
+func TestApportCannotStart(t *testing.T) {
+	// apport sets kernel.core_pattern to itself when its service starts.
+	if status, _ := exec.Command("dpkg-query", "-W", "-f=${Status}", "apport").Output(); string(status) != "install ok installed" {
+		return
+	}
+	if got, _ := exec.Command("systemctl", "is-enabled", "apport.service").Output(); strings.TrimSpace(string(got)) != "masked" {
+		t.Errorf("apport.service is %q, want masked", strings.TrimSpace(string(got)))
+	}
+	if got, _ := exec.Command("systemctl", "is-active", "apport.service").Output(); strings.TrimSpace(string(got)) == "active" {
+		t.Error("apport.service is active")
+	}
+}
+
 func TestUnattendedUpgradesInstallUpdatesAndRebootWhenNeeded(t *testing.T) {
 	if status := command(t, "dpkg-query", "-W", "-f=${Status}", "unattended-upgrades"); status != "install ok installed" {
 		t.Errorf("unattended-upgrades package status %q", status)

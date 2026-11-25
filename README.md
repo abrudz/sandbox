@@ -78,6 +78,7 @@ sudo deploy/setup-host
 
 `deploy/setup-host` does the following:
 - installs Docker Engine and compose, `ufw` and unattended upgrades;
+- masks apport and sets the kernel's core pattern to a file name, so that no crash, which a run can cause at will, starts a helper on the VM;
 - allows SSH, HTTP and HTTPS through the firewall and nothing else;
 - installs the instance in `/opt/sandbox`, with the seccomp profile and limits sized to the VM, and the daily update as `sandbox-update.service` and `sandbox-update.timer`;
 - starts the instance.

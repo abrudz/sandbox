@@ -212,3 +212,31 @@ func TestARequestWhoseBodyStallsGets408After15Seconds(t *testing.T) {
 		t.Errorf("the connection stayed open after the 408: %v", err)
 	}
 }
+
+func TestJobDirectoriesLeftByAnEarlierProcessAreRemovedAtStartUp(t *testing.T) {
+	_, container := startContainer(t)
+	// A directory runner-api did not remove, as after an abrupt exit. The
+	// container keeps /tmp across a restart.
+	const leftover = "/tmp/sandbox-jobs/job-left-behind"
+	if out, err := docker(t, "exec", container, "mkdir", "-p", leftover); err != nil {
+		t.Fatalf("creating %s: %v\n%s", leftover, err, out)
+	}
+
+	if out, err := docker(t, "restart", container); err != nil {
+		t.Fatalf("restarting %s: %v\n%s", container, err, out)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		state, _ := docker(t, "inspect", "-f", "{{.State.Status}}", container)
+		_, err := docker(t, "exec", container, "test", "-e", leftover)
+		if strings.TrimSpace(state) == "running" && err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			logs, _ := docker(t, "logs", container)
+			t.Fatalf("30 s after the restart, the container is %q and %s is still there\n%s", strings.TrimSpace(state), leftover, logs)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
