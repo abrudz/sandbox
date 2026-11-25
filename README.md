@@ -49,8 +49,9 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 | `SANDBOX_PIDS` | `64` | Processes one run may have |
 | `SANDBOX_REQUEST_LIMIT` | `65536` | Bytes of code plus input in one request |
 | `SANDBOX_CONCURRENCY` | the number of CPUs | Runs in progress at once |
-| `SANDBOX_CLIENT_CONCURRENCY` | `2` | Runs one client may have in progress at once |
+| `SANDBOX_CLIENT_CONCURRENCY` | `2` | Run requests one client may have in progress at once, counted from their arrival |
 | `SANDBOX_CLIENT_RATE` | `30` | Runs one client may start per minute |
+| `SANDBOX_READ_CONCURRENCY` | `64` | Run requests whose bodies are read at once, across all clients |
 | `SANDBOX_TRUSTED_PROXIES` | none | Comma-separated addresses or networks whose `X-Forwarded-For` header names the client |
 
 ### API

@@ -34,8 +34,9 @@ type Limits struct {
 	// Concurrency is the number of runs in progress at once across all
 	// clients (SANDBOX_CONCURRENCY).
 	Concurrency int
-	// ClientConcurrency is the number of runs one client may have in
-	// progress at once (SANDBOX_CLIENT_CONCURRENCY).
+	// ClientConcurrency is the number of run requests one client may have
+	// in progress at once, counted from their arrival
+	// (SANDBOX_CLIENT_CONCURRENCY).
 	ClientConcurrency int
 	// ClientRate is the number of runs one client may start per minute
 	// (SANDBOX_CLIENT_RATE).
@@ -67,6 +68,7 @@ const (
 	defaultRequestLimit      = 64 * 1024
 	defaultClientConcurrency = 2
 	defaultClientRate        = 30
+	defaultReadConcurrency   = 64
 )
 
 // FromEnv reads the limits, applying defaults for unset variables. getenv
@@ -82,6 +84,7 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 		Concurrency:       runtime.NumCPU(),
 		ClientConcurrency: defaultClientConcurrency,
 		ClientRate:        defaultClientRate,
+		ReadConcurrency:   defaultReadConcurrency,
 	}
 
 	for _, v := range []struct {
@@ -90,8 +93,9 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 	}{
 		{"SANDBOX_REQUEST_LIMIT", "a positive number of bytes", &limits.RequestLimit},
 		{"SANDBOX_CONCURRENCY", "a positive number of runs", &limits.Concurrency},
-		{"SANDBOX_CLIENT_CONCURRENCY", "a positive number of runs", &limits.ClientConcurrency},
+		{"SANDBOX_CLIENT_CONCURRENCY", "a positive number of requests", &limits.ClientConcurrency},
 		{"SANDBOX_CLIENT_RATE", "a positive number of runs per minute", &limits.ClientRate},
+		{"SANDBOX_READ_CONCURRENCY", "a positive number of requests", &limits.ReadConcurrency},
 	} {
 		if s := getenv(v.name); s != "" {
 			n, err := strconv.Atoi(s)

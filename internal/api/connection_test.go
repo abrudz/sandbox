@@ -171,6 +171,39 @@ func TestAClientThatDisconnectsAfterAPaddedBodyEndsItsRun(t *testing.T) {
 	}
 }
 
+func TestAConnectionServesItsNextRequestAfterARunsResponseTimeoutHasPassed(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.ResponseTimeout = 200 * time.Millisecond })
+	conn := dial(t, serve(t, h))
+	br := bufio.NewReader(conn)
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, runRequest(len(okBody))+okBody); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("the run: %v", err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+
+	// A proxy keeps the connection for later requests.
+	time.Sleep(400 * time.Millisecond)
+	if _, err := io.WriteString(conn, "GET /api/v1/version HTTP/1.1\r\nHost: sandbox\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.ReadResponse(br, nil)
+
+	if err != nil {
+		t.Fatalf("the next request on the connection, after the run's response timeout: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("the next request on the connection: status %d, want 200", resp.StatusCode)
+	}
+}
+
 // bigFirstExecutor answers its first run with 16 MiB of output, more than
 // a loopback connection's buffers hold, and later runs with none.
 type bigFirstExecutor struct {

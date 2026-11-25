@@ -23,20 +23,60 @@ func (s *Server) bodyLimit() int64 {
 	return 6*int64(s.opts.RequestLimit+maxArgs*maxArgLen) + 4096
 }
 
-// admission tracks runs in progress and recent run starts. A limit of zero
-// in Options means no limit.
+// admission tracks run requests in progress, the bodies being read, runs
+// in progress and recent run starts. A limit of zero in Options means no
+// limit.
 type admission struct {
 	mu        sync.Mutex
 	draining  bool
 	drained   chan struct{} // closed once draining with no run in progress
-	active    int
+	active    int           // runs in progress
+	reading   int           // run request bodies being read
 	perClient map[string]int
 	starts    map[string][]time.Time // run starts in the last minute
 	swept     time.Time
 }
 
-// admit reserves a run for client, or returns the status and reason for
-// refusing it. release must be called once the run has finished.
+// enter counts a run request from client from the moment its headers
+// arrive, before its body is read, and reserves one of the bodies read at
+// once. read must be called once the body has been read, and leave once
+// the request has been answered.
+func (s *Server) enter(client string) (read, leave func(), status int, reason string) {
+	a := &s.admission
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.draining {
+		return nil, nil, http.StatusServiceUnavailable, "the service is shutting down"
+	}
+	if s.opts.ClientConcurrency > 0 && a.perClient[client] >= s.opts.ClientConcurrency {
+		return nil, nil, http.StatusTooManyRequests, "this client has its maximum number of requests in progress"
+	}
+	if s.opts.ReadConcurrency > 0 && a.reading >= s.opts.ReadConcurrency {
+		return nil, nil, http.StatusServiceUnavailable, "too many requests are arriving at once"
+	}
+	a.perClient[client]++
+	a.reading++
+	var once sync.Once
+	read = func() {
+		once.Do(func() {
+			a.mu.Lock()
+			a.reading--
+			a.mu.Unlock()
+		})
+	}
+	return read, func() {
+		read()
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.perClient[client]--; a.perClient[client] == 0 {
+			delete(a.perClient, client)
+		}
+	}, 0, ""
+}
+
+// admit reserves a run slot for client, or returns the status and reason
+// for refusing it. release must be called once the run has finished.
 func (s *Server) admit(client string) (release func(), status int, reason string) {
 	a := &s.admission
 	a.mu.Lock()
@@ -46,33 +86,28 @@ func (s *Server) admit(client string) (release func(), status int, reason string
 		return nil, http.StatusServiceUnavailable, "the service is shutting down"
 	}
 	now := s.now()
+	// A client enters the table of recent starts only when a run starts.
+	var recent []time.Time
 	if s.opts.ClientRate > 0 {
 		a.sweep(now)
-		recent := since(a.starts[client], now.Add(-time.Minute))
-		a.starts[client] = recent
+		recent = since(a.starts[client], now.Add(-time.Minute))
 		if len(recent) >= s.opts.ClientRate {
+			a.starts[client] = recent
 			return nil, http.StatusTooManyRequests, "this client has started its maximum number of runs in the last minute"
 		}
-	}
-	if s.opts.ClientConcurrency > 0 && a.perClient[client] >= s.opts.ClientConcurrency {
-		return nil, http.StatusTooManyRequests, "this client has its maximum number of runs in progress"
 	}
 	if s.opts.Concurrency > 0 && a.active >= s.opts.Concurrency {
 		return nil, http.StatusTooManyRequests, "every run slot is busy"
 	}
 
 	a.active++
-	a.perClient[client]++
 	if s.opts.ClientRate > 0 {
-		a.starts[client] = append(a.starts[client], now)
+		a.starts[client] = append(recent, now)
 	}
 	return func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.active--
-		if a.perClient[client]--; a.perClient[client] == 0 {
-			delete(a.perClient, client)
-		}
 		if a.draining && a.active == 0 {
 			close(a.drained)
 		}
