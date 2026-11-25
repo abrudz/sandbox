@@ -12,7 +12,7 @@ You need Docker with cgroup v2: Docker Desktop on Windows (with WSL 2) or macOS,
 curl -LO https://raw.githubusercontent.com/abrudz/sandbox/main/deploy/seccomp.json
 docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
   --security-opt systempaths=unconfined --security-opt seccomp=seccomp.json \
-  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+  --cgroupns private -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 Then open http://localhost:8000, type a program such as `⎕←2+2`, and press Ctrl-Enter to run it. Permalinks have TIO's format, so a tio.run link for APL (Dyalog Unicode) opens here with `https://tio.run/` replaced by `http://localhost:8000/`.
@@ -26,7 +26,9 @@ nsjail builds a jail for every run, and each flag gives it something Docker othe
 - `systempaths=unconfined`: the kernel refuses a new `/proc` while parts of the container's are masked.
 - `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`.
 
-The container keeps Docker's other capability limits, its device filter and its seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the four flags also works, but gives the container every capability and the host's devices.
+`--cgroupns private`, Docker's default on cgroup v2, gives the container a cgroup namespace of its own. The entry point changes the cgroup at the root of that namespace, so it refuses to start in the host's.
+
+The container keeps Docker's other capability limits, its device filter and its seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the first four flags also works, but gives the container every capability and the host's devices.
 
 To update, `docker pull ghcr.io/abrudz/sandbox`. Each image is also tagged with its Dyalog version, such as `ghcr.io/abrudz/sandbox:21.0.55109.0`.
 

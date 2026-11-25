@@ -17,6 +17,9 @@ services:
       # Docker's default seccomp profile with pivot_root allowed, read when
       # the container is created.
       - seccomp=./seccomp.json
+    # The entry point changes the cgroup at the root of its namespace, which
+    # must be the container's own whatever the daemon's default.
+    cgroup: private
     # deploy/setup-host derives these from the VM's memory and CPUs: the
     # host keeps 512 MiB beyond the container's limit, and the container's
     # concurrent runs fit within it.
