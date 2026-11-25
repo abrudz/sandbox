@@ -51,7 +51,7 @@ The public instance puts Caddy in front of the container for TLS.
 ### Request flow
 
 1. The frontend joins header, code and footer, as TIO does, and sends `POST /api/v1/run` with the code, the input and the arguments.
-2. `runner-api` validates the request, takes a concurrency slot (or answers 429), and writes the code and the input into a fresh per-run directory.
+2. Before reading the body, `runner-api` counts the request against its client (or answers 429) and against the bodies being read at once (or answers 503). It reads and validates the request, takes a concurrency slot (or answers 429), and writes the code and the input into a fresh per-run directory.
 3. The executor starts nsjail with that directory mounted read-only at `/job` and the arguments on its command line. There is no shell, so arguments are never interpreted.
 4. Inside the jail, `image/run` runs the program with `dyalogscript` (below).
 5. The executor collects up to the output cap from each stream and keeps draining past it. It enforces the wall-clock limit, kills everything left in the run's cgroup, removes the per-run directory, and returns the result.
@@ -86,7 +86,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | Privileges | unprivileged uid and gid in a new user namespace, no capabilities, nsjail's seccomp-bpf denylist (namespace creation, `mount`, `ptrace`, `bpf`, `keyctl`, `perf_event_open` and similar) inside the container's seccomp profile, Docker's default allowlist, rlimits for core files and open files | always on |
 | Output | per-stream cap; truncation reported in the response | 128 KiB |
 | Request size | code plus input | 64 KiB |
-| Concurrency | global slots; per-client concurrent and per-minute limits | CPU count; 2; 30 |
+| Concurrency | global slots; per-client limits on requests in progress, counted from their arrival, and on runs started per minute; request bodies read at once | CPU count; 2; 30; 64 |
 
 Every numeric value is configuration. `runner-api` reads it from environment variables (`SANDBOX_TIMEOUT`, `SANDBOX_MEMORY`, and so on), passed with `docker run -e` or from the compose file. The defaults above apply when a variable is unset.
 
@@ -116,7 +116,8 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 ```
 
 - `stdout` and `stderr` hold exactly what the interpreter wrote, as UTF-8 strings (invalid byte sequences replaced by U+FFFD). The API does not alter line endings; presentation is the client's concern.
-- Errors: `400` malformed request, `413` request too large, `429` no free concurrency slot or client over its rate limit, `503` sandbox unavailable or shutting down.
+- Errors: `400` malformed request, including anything but whitespace after the JSON value; `408` request not received in full within 15 s; `413` request too large; `429` no free concurrency slot, or client over its concurrent or per-minute limit; `503` too many request bodies being read, sandbox unavailable, or shutting down.
+- A run's slot is freed when the run ends. A response the client has not read within 10 s is abandoned, and a connection idle for 3 minutes is closed; Caddy keeps an idle upstream connection for 2 minutes, so it never sends a request on a connection being closed.
 - `GET /api/v1/version` returns `{"dyalogVersion": "...", "imageDigest": "sha256:...", "commit": "...", "timeoutMs": 10000}`: the first three from the image labels, and the run time limit.
 - `GET /healthz` returns `200` when the API is serving.
 - On `SIGTERM`, `runner-api` stops accepting runs, lets runs in progress finish, then exits.

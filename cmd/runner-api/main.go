@@ -33,6 +33,16 @@ const (
 	jobsDir      = "/tmp/sandbox-jobs"
 )
 
+// Connection limits. A request arrives in full, headers and body, within
+// readTimeout. An idle connection lasts longer than Caddy keeps one open
+// (two minutes), so Caddy never sends a request on a connection being
+// closed. A run's response is written within responseTimeout.
+const (
+	readTimeout     = 15 * time.Second
+	idleTimeout     = 3 * time.Minute
+	responseTimeout = 10 * time.Second
+)
+
 func main() {
 	limits, err := config.FromEnv(os.Getenv)
 	if err != nil {
@@ -65,17 +75,17 @@ func main() {
 		Concurrency:       limits.Concurrency,
 		ClientConcurrency: limits.ClientConcurrency,
 		ClientRate:        limits.ClientRate,
+		ReadConcurrency:   limits.ReadConcurrency,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+		ResponseTimeout:   responseTimeout,
 		TrustedProxies:    limits.TrustedProxies,
 		WebDir:            webDir,
 		ImageDigest:       imageDigest,
 		Commit:            commit,
 		Timeout:           limits.Timeout,
 	})
-	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := handler.HTTPServer(":8080")
 
 	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

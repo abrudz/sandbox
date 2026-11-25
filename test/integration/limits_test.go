@@ -3,9 +3,14 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -167,5 +172,43 @@ func TestSandboxTimeoutSetsTheWallClockLimit(t *testing.T) {
 	}
 	if r.WallTimeMs >= 3000 {
 		t.Errorf("wall time %d ms, want under 3000 with SANDBOX_TIMEOUT=2s", r.WallTimeMs)
+	}
+}
+
+func TestARequestWhoseBodyStallsGets408After15Seconds(t *testing.T) {
+	u, err := neturl.Parse(env(t, "SANDBOX_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+
+	begun := time.Now()
+	head := fmt.Sprintf("POST /api/v1/run HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n", u.Host)
+	if _, err := io.WriteString(conn, head+`{"code":`); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(begun.Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(br, nil)
+	elapsed := time.Since(begun)
+
+	if err != nil {
+		t.Fatalf("no response within 30 s: %v", err)
+	}
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Errorf("status %d, want 408", resp.StatusCode)
+	}
+	if elapsed < 14*time.Second || elapsed > 20*time.Second {
+		t.Errorf("answered after %v, want about 15 s", elapsed)
+	}
+	// io.Copy reports the end of the stream as success.
+	if _, err := io.Copy(io.Discard, br); err != nil {
+		t.Errorf("the connection stayed open after the 408: %v", err)
 	}
 }

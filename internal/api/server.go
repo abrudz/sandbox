@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -28,11 +29,20 @@ type Options struct {
 	RequestLimit int
 	// Concurrency is the number of runs in progress at once.
 	Concurrency int
-	// ClientConcurrency is the number of runs one client may have in
-	// progress at once.
+	// ClientConcurrency is the number of run requests one client may have
+	// in progress at once, counted from the arrival of their headers.
 	ClientConcurrency int
 	// ClientRate is the number of runs one client may start per minute.
 	ClientRate int
+	// ReadConcurrency is the number of run request bodies read at once.
+	ReadConcurrency int
+	// ReadTimeout is the time a request has to arrive in full, headers and
+	// body, and IdleTimeout the time a connection may wait for its next
+	// request; HTTPServer applies both.
+	ReadTimeout time.Duration
+	IdleTimeout time.Duration
+	// ResponseTimeout is the time a run's response has to be written.
+	ResponseTimeout time.Duration
 	// TrustedProxies are the peers whose X-Forwarded-For header names the
 	// client; any other peer is the client itself.
 	TrustedProxies []netip.Prefix
@@ -75,6 +85,17 @@ func NewHandler(opts Options) *Server {
 		s.mux.Handle("GET /", http.FileServer(http.Dir(opts.WebDir)))
 	}
 	return s
+}
+
+// HTTPServer returns an http.Server that serves s on addr with the read and
+// idle timeouts in Options. The read timeout also bounds the headers.
+func (s *Server) HTTPServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:        addr,
+		Handler:     s,
+		ReadTimeout: s.opts.ReadTimeout,
+		IdleTimeout: s.opts.IdleTimeout,
+	}
 }
 
 // ServeHTTP implements http.Handler. While draining, every new request
@@ -140,20 +161,37 @@ type runResponse struct {
 // run executes one program. Every completed run answers 200, whatever the
 // program's exit status; 503 means the sandbox could not run it.
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
+	client := s.clientOf(r)
+	read, leave, status, reason := s.enter(client)
+	if status != 0 {
+		http.Error(w, reason, status)
+		return
+	}
+	defer leave()
 	req, status, reason := s.decode(w, r)
+	read()
+	if status != 0 {
+		if status == http.StatusRequestTimeout {
+			w.Header().Set("Connection", "close")
+		}
+		http.Error(w, reason, status)
+		return
+	}
+	release, status, reason := s.admit(client)
 	if status != 0 {
 		http.Error(w, reason, status)
 		return
 	}
-	release, status, reason := s.admit(s.clientOf(r))
-	if status != 0 {
-		http.Error(w, reason, status)
-		return
-	}
-	defer release()
 
 	job := sandbox.Job{Code: []byte(req.Code), Input: []byte(req.Input), Args: req.Args}
 	result, err := s.opts.Executor.Run(r.Context(), job)
+	release()
+	if s.opts.ResponseTimeout > 0 {
+		// A client that does not read its response is abandoned. The server
+		// flushes the response before clearing the deadline for the next
+		// request on the connection, so all of it is written under it.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
+	}
 	if err != nil {
 		if r.Context().Err() != nil {
 			// The client disconnected; the executor has stopped the run.
@@ -183,18 +221,35 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 }
 
 // decode reads and validates a run request, or returns the status and
-// reason for refusing it.
+// reason for refusing it. Only whitespace may follow the JSON value; the
+// body is read to its end, which is when the server starts watching for
+// the client to disconnect.
 func (s *Server) decode(w http.ResponseWriter, r *http.Request) (runRequest, int, string) {
 	var req runRequest
 	body := r.Body
 	if s.opts.RequestLimit > 0 {
 		body = http.MaxBytesReader(w, r.Body, s.bodyLimit())
 	}
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return req, http.StatusRequestEntityTooLarge, "request body too large"
+	dec := json.NewDecoder(body)
+	err := dec.Decode(&req)
+	if err == nil {
+		// Token skips whitespace and reports the end of the body as io.EOF.
+		if _, err = dec.Token(); err == nil {
+			return req, http.StatusBadRequest, "malformed request: data after the JSON value"
 		}
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+	}
+	var tooLarge *http.MaxBytesError
+	var netErr net.Error
+	switch {
+	case err == nil:
+	case errors.As(err, &tooLarge):
+		return req, http.StatusRequestEntityTooLarge, "request body too large"
+	case errors.As(err, &netErr) && netErr.Timeout():
+		return req, http.StatusRequestTimeout, "the request did not arrive in time"
+	default:
 		return req, http.StatusBadRequest, "malformed request: " + err.Error()
 	}
 	if len(req.Args) > maxArgs {

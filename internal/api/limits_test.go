@@ -2,10 +2,13 @@ package api_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,14 +16,20 @@ import (
 	"github.com/abrudz/sandbox/internal/sandbox"
 )
 
-// blockingExecutor holds every run until release is closed.
+// blockingExecutor holds every run until release is closed, or until the
+// run's context ends, which it reports on cancelled.
 type blockingExecutor struct {
-	started chan struct{}
-	release chan struct{}
+	started   chan struct{}
+	cancelled chan struct{}
+	release   chan struct{}
 }
 
 func newBlockingExecutor() *blockingExecutor {
-	return &blockingExecutor{started: make(chan struct{}, 100), release: make(chan struct{})}
+	return &blockingExecutor{
+		started:   make(chan struct{}, 100),
+		cancelled: make(chan struct{}, 100),
+		release:   make(chan struct{}),
+	}
 }
 
 func (b *blockingExecutor) Run(ctx context.Context, _ sandbox.Job) (sandbox.Result, error) {
@@ -28,6 +37,7 @@ func (b *blockingExecutor) Run(ctx context.Context, _ sandbox.Job) (sandbox.Resu
 	select {
 	case <-b.release:
 	case <-ctx.Done():
+		b.cancelled <- struct{}{}
 		return sandbox.Result{}, ctx.Err()
 	}
 	zero := 0
@@ -70,9 +80,14 @@ const okBody = `{"code":"⎕←1","input":"","args":[]}`
 // 3 s is abandoned, so a run that should have been refused cannot hang the
 // test; it then reports 200, the recorder's default.
 func post(h http.Handler, addr, body string, header ...string) int {
+	return postReader(h, addr, strings.NewReader(body), header...)
+}
+
+// postReader is post with a body read from body.
+func postReader(h http.Handler, addr string, body io.Reader, header ...string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/run", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/run", body)
 	req.RemoteAddr = addr + ":40000"
 	req.Header.Set("Content-Type", "application/json")
 	for i := 0; i+1 < len(header); i += 2 {
@@ -107,6 +122,59 @@ func receive(t *testing.T, status <-chan int) int {
 	}
 }
 
+// stalledBody starts a run request from addr whose body stops after its
+// first bytes, as a slow upload does, and returns once the handler is
+// reading it. finish sends the rest of a valid body and returns the
+// request's status.
+func stalledBody(t *testing.T, h http.Handler, addr string) (finish func() int) {
+	t.Helper()
+	r, w := io.Pipe()
+	t.Cleanup(func() { w.CloseWithError(errors.New("test over")) })
+	status := make(chan int, 1)
+	go func() { status <- postReader(h, addr, r) }()
+
+	// A pipe write returns once the reader has taken the bytes.
+	written := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(w, `{"code":"`)
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Fatalf("writing the start of the body: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the handler did not read the body of a request from %s within 5 s", addr)
+	}
+	return func() int {
+		if _, err := io.WriteString(w, `","input":"","args":[]}`); err != nil {
+			t.Fatalf("writing the rest of the body: %v", err)
+		}
+		w.Close()
+		return receive(t, status)
+	}
+}
+
+// stuckWriter is the ResponseWriter of a client that does not read: Write
+// blocks until unblock is closed.
+type stuckWriter struct {
+	header  http.Header
+	once    sync.Once
+	writing chan struct{} // closed on the first Write
+	unblock chan struct{}
+}
+
+func (w *stuckWriter) Header() http.Header { return w.header }
+
+func (w *stuckWriter) WriteHeader(int) {}
+
+func (w *stuckWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.writing) })
+	<-w.unblock
+	return len(p), nil
+}
+
 func TestPostRunAnswers400ForMalformedJSON(t *testing.T) {
 	h := handler(&fakeExecutor{}, nil)
 
@@ -114,6 +182,19 @@ func TestPostRunAnswers400ForMalformedJSON(t *testing.T) {
 		if got := post(h, "192.0.2.1", body); got != http.StatusBadRequest {
 			t.Errorf("body %q: status %d, want 400", body, got)
 		}
+	}
+}
+
+func TestPostRunAnswers400ForDataAfterTheJSONValue(t *testing.T) {
+	h := handler(&fakeExecutor{}, nil)
+
+	for _, body := range []string{okBody + "x", okBody + "{}", okBody + ` "more"`} {
+		if got := post(h, "192.0.2.1", body); got != http.StatusBadRequest {
+			t.Errorf("body %q: status %d, want 400", body, got)
+		}
+	}
+	if got := post(h, "192.0.2.1", okBody+" \r\n\t"); got != http.StatusOK {
+		t.Errorf("whitespace after the JSON value: status %d, want 200", got)
 	}
 }
 
@@ -206,6 +287,75 @@ func TestAClientOverItsConcurrentLimitGets429AndOthersAreUnaffected(t *testing.T
 	}
 	receive(t, a1)
 	receive(t, a2)
+}
+
+func TestAClientWhoseRequestsAreStillSendingBodiesGets429AtOnce(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.ClientConcurrency = 2 })
+	stalledBody(t, h, "192.0.2.1")
+	stalledBody(t, h, "192.0.2.1")
+
+	begun := time.Now()
+	got := post(h, "192.0.2.1", okBody)
+	elapsed := time.Since(begun)
+
+	if got != http.StatusTooManyRequests {
+		t.Errorf("client's third request: status %d, want 429", got)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("the 429 took %v; it should not wait for the other bodies", elapsed)
+	}
+	if got := post(h, "192.0.2.2", okBody); got != http.StatusOK {
+		t.Errorf("another client's run: status %d, want 200", got)
+	}
+}
+
+func TestBodiesBeyondTheReadLimitGet503AtOnceUntilOneFinishes(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.ReadConcurrency = 2 })
+	finish := stalledBody(t, h, "192.0.2.1")
+	stalledBody(t, h, "192.0.2.2")
+
+	begun := time.Now()
+	got := post(h, "192.0.2.3", okBody)
+	elapsed := time.Since(begun)
+
+	if got != http.StatusServiceUnavailable {
+		t.Errorf("a third body while two are being read: status %d, want 503", got)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("the 503 took %v; it should not wait for the other bodies", elapsed)
+	}
+	if got := finish(); got != http.StatusOK {
+		t.Errorf("the request whose body then arrived: status %d, want 200", got)
+	}
+	if got := post(h, "192.0.2.3", okBody); got != http.StatusOK {
+		t.Errorf("a body once one of the two has been read: status %d, want 200", got)
+	}
+}
+
+func TestAFinishedRunReleasesItsSlotBeforeItsResponseIsWritten(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.Concurrency = 1 })
+	w := &stuckWriter{header: http.Header{}, writing: make(chan struct{}), unblock: make(chan struct{})}
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/run", strings.NewReader(okBody))
+		req.RemoteAddr = "192.0.2.1:40000"
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(w, req)
+	}()
+	select {
+	case <-w.writing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first run's response was not written within 5 s")
+	}
+	defer func() {
+		close(w.unblock)
+		<-first
+	}()
+
+	if got := post(h, "192.0.2.2", okBody); got != http.StatusOK {
+		t.Errorf("a run while the first run's response is being written: status %d, want 200", got)
+	}
 }
 
 func TestAClientOverItsPerMinuteLimitGets429AndOthersAreUnaffected(t *testing.T) {
