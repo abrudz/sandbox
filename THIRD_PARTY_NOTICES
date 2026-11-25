@@ -69,7 +69,8 @@ Moby's default seccomp profile, revision
   https://github.com/moby/profiles (seccomp/default.json)
   Licensed under the Apache License, Version 2.0 (text below).
   Modified: pivot_root is added to the system calls allowed under
-  CAP_SYS_ADMIN.
+  CAP_SYS_ADMIN, and SCMP_ARCH_X86_64 has no sub-architectures, so
+  i386 and x32 system calls are refused.
 
 
 Apache License, Version 2.0 (nsjail, Kafel, Moby's seccomp profile)

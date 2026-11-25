@@ -24,7 +24,7 @@ nsjail builds a jail for every run, and each flag gives it something Docker othe
 - `--cap-add SYS_ADMIN`: creating namespaces, mounts and cgroups.
 - `apparmor=unconfined`: Docker's AppArmor profile denies `mount`.
 - `systempaths=unconfined`: the kernel refuses a new `/proc` while parts of the container's are masked.
-- `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`.
+- `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`. It also refuses i386 and x32 system calls on x86_64, which Docker's default allows.
 
 `--cgroupns private`, Docker's default on cgroup v2, gives the container a cgroup namespace of its own. The entry point changes the cgroup at the root of that namespace, so it refuses to start in the host's.
 
