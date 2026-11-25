@@ -40,11 +40,14 @@ jobs:
         run: scripts/build-image "$SANDBOX_IMAGE" "$UPSTREAM" "$DIGEST"
 
       - name: Start container
-        # Every test run comes from this one client, so the per-minute limit
-        # is raised for the shared container; tests of the limit start
-        # containers of their own.
+        # The flags are README.md's; runFlags in test/integration gives the
+        # containers the tests start the same ones. Every test run comes from
+        # this one client, so the per-minute limit is raised for the shared
+        # container; tests of the limit start containers of their own.
         run: |
-          docker run -d --privileged --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
+          docker run -d --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+            --security-opt systempaths=unconfined --security-opt seccomp="$PWD/deploy/seccomp.json" \
+            --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
             -e SANDBOX_CLIENT_RATE=100000 "$SANDBOX_IMAGE"
           for _ in $(seq 30); do
             if curl -s -o /dev/null "$SANDBOX_URL/"; then

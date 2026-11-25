@@ -7,7 +7,9 @@ A small public service is needed that runs short Dyalog APL programs submitted b
 The deliverable is one container image that runs the whole service:
 
 ```
-docker run --rm --privileged -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
+  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 The backend is new; the frontend is taken from TIO, which is MIT-licensed:
@@ -41,7 +43,7 @@ The public instance puts Caddy in front of the container for TLS.
   3. Final stage `FROM docker.io/dyalog/dyalog:latest`, adding nsjail's runtime libraries, nsjail, `runner-api`, `web/`, `image/run`, `image/nsjail.cfg`, the seccomp policy and `image/entrypoint`.
 - `image/entrypoint` replaces the base image's entry point, which prints a banner. It moves itself into a leaf cgroup, enables the `cpu`, `memory` and `pids` controllers for child cgroups, and then starts `runner-api`.
 - `runner-api` runs as root inside the container because nsjail needs that to create namespaces and cgroups. Every run executes as an unprivileged uid inside its own user namespace.
-- The host needs cgroup v2 and Docker Engine, Docker Desktop or rootful Podman. The container must run with `--privileged`, which is how nsjail's own documentation runs it under Docker. The container is therefore not a security boundary: the jail is, and on the public instance a dedicated VM that holds no secrets is the outer boundary.
+- The host needs cgroup v2 and Docker Engine, Docker Desktop or rootful Podman; the flags in Context are Docker's, and untested with Podman. The container runs with those flags, each of which nsjail needs: `CAP_SYS_ADMIN` to create namespaces, mounts and cgroups; AppArmor unconfined, because Docker's AppArmor profile denies `mount`; Docker's masked paths unconfined, because the kernel refuses a new `/proc` while parts of the container's are masked; and `deploy/seccomp.json`, Docker's default seccomp profile with `pivot_root` allowed under `CAP_SYS_ADMIN`, because the default refuses it. `image/entrypoint` remounts `/sys/fs/cgroup` read-write, which Docker mounts read-only. The container keeps Docker's other capability limits, its device filter and its seccomp profile, which applies inside the jail too; `--privileged` also works but drops all three. Root in the container holds `CAP_SYS_ADMIN`, so the container is still not the security boundary: the jail is, and on the public instance a dedicated VM that holds no secrets is the outer boundary.
 - The image keeps Dyalog's `LICENSE` file, as the base image's README requires for derived images. `THIRD_PARTY_NOTICES` lists TIO's frontend (MIT), pako (MIT and zlib), `abrudz/lb` (MIT), the APL387 and APL335 fonts (Unlicense), the APL logo (CC0) and nsjail (Apache-2.0); it ships in the repository and in the image.
 - The build sets three labels: the upstream image digest, the full Dyalog version (read from the interpreter during the build) and the source commit.
 - Published images cover amd64 only.
@@ -81,7 +83,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` below the limit | 512 MiB; `MAXWS=256M` |
 | Disk | tmpfs `size=` per writable mount, counted against the memory limit | 16 MiB each |
 | Processes and threads | cgroup `pids.max` | 64 |
-| Privileges | unprivileged uid and gid in a new user namespace, no capabilities, seccomp-bpf policy based on Docker's default deny list (namespace creation, `mount`, `ptrace`, `bpf`, `keyctl`, `perf_event_open` and similar), rlimits for core files and open files | always on |
+| Privileges | unprivileged uid and gid in a new user namespace, no capabilities, nsjail's seccomp-bpf denylist (namespace creation, `mount`, `ptrace`, `bpf`, `keyctl`, `perf_event_open` and similar) inside the container's seccomp profile, Docker's default allowlist, rlimits for core files and open files | always on |
 | Output | per-stream cap; truncation reported in the response | 128 KiB |
 | Request size | code plus input | 64 KiB |
 | Concurrency | global slots; per-client concurrent and per-minute limits | CPU count; 2; 30 |
@@ -151,7 +153,7 @@ Added:
 ### Publishing and updates
 
 - `.github/workflows/publish.yml` runs on every push to `main` and daily. It resolves the digest of `docker.io/dyalog/dyalog:latest`.
-- It builds and tests on every push, and on the daily run only when the upstream digest differs from the label on the published image. It builds the image, starts it with `--privileged` on the runner, and runs the integration and UI suites against it.
+- It builds and tests on every push, and on the daily run only when the upstream digest differs from the label on the published image. It builds the image, starts it with the flags in Context on the runner, and runs the integration and UI suites against it.
 - If every suite passes, it pushes `ghcr.io/abrudz/sandbox:latest` and `ghcr.io/abrudz/sandbox:<dyalog-version>`. If any suite fails, nothing is published and the workflow fails.
 - There is no human approval step; the test suites are the gate. The version tags allow manual rollback.
 - The local instance updates with `docker pull`. The public instance runs a daily systemd timer that runs `docker compose pull` and `docker compose up -d`. The compose file's stop grace period is longer than the wall-clock limit, so runs in progress finish before the old container exits.
@@ -186,7 +188,7 @@ Before item 1, the first commit on `main` of `abrudz/sandbox` adds the project k
 Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. Integration tests (`go test -tags integration ./test/integration/...`) and UI tests are black-box tests against a running container whose address is in `SANDBOX_URL`; they run in CI only (see Development environment).
 
 **1. Container skeleton and CI**
-- Building `image/Containerfile` produces an image, and running it with `--privileged` serves `GET /healthz` with 200.
+- Building `image/Containerfile` produces an image, and running it with the flags in Context serves `GET /healthz` with 200.
 - The image contains Dyalog's `LICENSE` and `THIRD_PARTY_NOTICES`.
 - CI runs `gofmt`, `go vet`, `staticcheck`, `shellcheck` and `go test ./...`, builds the image and runs the integration suite against it on every push. Any failure fails the build.
 
@@ -261,13 +263,15 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 
   ```
   docker build -t sandbox -f image/Containerfile .
-  docker run -d --rm --privileged --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
+  docker run -d --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+    --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
+    --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
   SANDBOX_URL=http://localhost:8000 go test -tags integration ./test/integration/...
   (cd test/ui && SANDBOX_URL=http://localhost:8000 npx playwright test)
   ```
 
   Results: `gh run watch` on the branch; `gh run view --log-failed` for failures.
-- Manual, by the user on a machine with Docker (not the dev container): `docker run --rm --privileged -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox`, then `curl -s localhost:8000/api/v1/run -d '{"code":"⎕←2+2","input":"","args":[]}'` returns stdout starting with `4`. Open `http://localhost:8000`, enter `⎕←2+2`, press Ctrl-Enter and see `4`. Open a tio.run `apl-dyalog` permalink with its host replaced by `localhost:8000`.
+- Manual, by the user on a machine with Docker (not the dev container): the `docker run` command in Context, then `curl -s localhost:8000/api/v1/run -d '{"code":"⎕←2+2","input":"","args":[]}'` returns stdout starting with `4`. Open `http://localhost:8000`, enter `⎕←2+2`, press Ctrl-Enter and see `4`. Open a tio.run `apl-dyalog` permalink with its host replaced by `localhost:8000`.
 
 ## Out of scope
 
@@ -288,15 +292,15 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 
 ## Development environment
 
-The dev container has no access to any Docker daemon and cannot create user namespaces, so the image is never built or run inside it. A privileged container is root on whichever machine runs it, and the developer's machine holds Windows drives and credentials; container work therefore runs only on GitHub Actions runners.
+The dev container has no access to any Docker daemon and cannot create user namespaces, so the image is never built or run inside it. Root in the sandbox container holds `CAP_SYS_ADMIN` on whichever machine runs it, and the developer's machine holds Windows drives and credentials; container work therefore runs only on GitHub Actions runners.
 
 - **In the dev container:** `go test ./...` (unit tests, with the fake executor), `node --test` for the frontend's pure functions, and the linters.
-- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with `--privileged`, and running the integration and UI suites against it.
+- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with the flags in Context, and running the integration and UI suites against it.
 - **Red and green evidence for container tests** is a CI run. In those cycles the tests are committed and pushed to the issue's branch, opened as a draft pull request, before review. Review changes land as further commits on the branch, never as force pushes. Runs are followed with `gh run watch` and failures read with `gh run view --log-failed`.
 
 ## Risks
 
-- **Privileged container.** The container adds no isolation, and `runner-api` runs as root inside it. A flaw in `runner-api`'s request handling is therefore as serious as a jail escape. Mitigations: a small Go codebase, strict request validation, no shell anywhere in the request path, and the dedicated VM.
+- **Root with `CAP_SYS_ADMIN` in the container.** `runner-api` runs as root inside the container, and AppArmor and Docker's masked paths are off there. A flaw in `runner-api`'s request handling is therefore nearly as serious as a jail escape. Mitigations: a small Go codebase, strict request validation, no shell anywhere in the request path, Docker's capability limits, device filter and seccomp profile, and the dedicated VM.
 - **Kernel escape.** Every run shares the host kernel, and `⎕NA` exposes raw system calls. Mitigations: user namespace, no capabilities, seccomp policy, prompt kernel updates on the VM. gVisor is the next step if the threat model demands it.
 - **Seccomp policy.** A policy that is too strict breaks the interpreter; one that is too loose leaves attack surface. Item 2 shows the interpreter works under the policy, and item 4 shows blocked calls fail.
 - **cgroups inside the container.** nsjail's cgroup limits depend on the entry point enabling controllers in the container's cgroup namespace. A misconfigured host makes the limits in item 4 fail.

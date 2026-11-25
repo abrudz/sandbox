@@ -18,7 +18,8 @@ func startContainer(t *testing.T, vars ...string) (url, name string) {
 	image := env(t, "SANDBOX_IMAGE")
 	name = fmt.Sprintf("sandbox-test-%d", time.Now().UnixNano())
 
-	args := []string{"run", "-d", "--privileged", "--name", name, "-p", "127.0.0.1::8080"}
+	args := append([]string{"run", "-d"}, runFlags(t)...)
+	args = append(args, "--name", name, "-p", "127.0.0.1::8080")
 	for _, v := range vars {
 		args = append(args, "-e", v)
 	}

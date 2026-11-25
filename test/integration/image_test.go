@@ -55,9 +55,11 @@ func TestImageShipsThirdPartyNotices(t *testing.T) {
 func TestImageRunsAJailedProcess(t *testing.T) {
 	image := env(t, "SANDBOX_IMAGE")
 
-	out, err := docker(t, "run", "--rm", "--privileged", "--entrypoint", "nsjail", image,
+	args := append([]string{"run", "--rm"}, runFlags(t)...)
+	args = append(args, "--entrypoint", "nsjail", image,
 		"--mode", "o", "--chroot", "/", "--user", "99999", "--group", "99999", "--quiet",
 		"--", "/bin/echo", "jailed")
+	out, err := docker(t, args...)
 	if err != nil {
 		t.Fatalf("running nsjail in %s: %v\n%s", image, err, out)
 	}

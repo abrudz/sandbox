@@ -9,14 +9,24 @@ The whole service is one container image, `ghcr.io/abrudz/sandbox`, built on Dya
 You need Docker with cgroup v2: Docker Desktop on Windows (with WSL 2) or macOS, or Docker Engine on Linux.
 
 ```
-docker run --rm --privileged -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+curl -LO https://raw.githubusercontent.com/abrudz/sandbox/main/deploy/seccomp.json
+docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+  --security-opt systempaths=unconfined --security-opt seccomp=seccomp.json \
+  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 Then open http://localhost:8000, type a program such as `⎕←2+2`, and press Ctrl-Enter to run it. Permalinks have TIO's format, so a tio.run link for APL (Dyalog Unicode) opens here with `https://tio.run/` replaced by `http://localhost:8000/`.
 
 The `127.0.0.1:` in `-p` publishes the port on this machine's loopback address only, so other machines cannot reach the service. Ctrl-C stops it once its runs in progress have finished.
 
-The container must be privileged because nsjail creates namespaces and cgroups for every run. A privileged container has root's power over the machine it runs on, so run only images you trust.
+nsjail builds a jail for every run, and each flag gives it something Docker otherwise withholds:
+
+- `--cap-add SYS_ADMIN`: creating namespaces, mounts and cgroups.
+- `apparmor=unconfined`: Docker's AppArmor profile denies `mount`.
+- `systempaths=unconfined`: the kernel refuses a new `/proc` while parts of the container's are masked.
+- `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`.
+
+The container keeps Docker's other capability limits, its device filter and its seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the four flags also works, but gives the container every capability and the host's devices.
 
 To update, `docker pull ghcr.io/abrudz/sandbox`. Each image is also tagged with its Dyalog version, such as `ghcr.io/abrudz/sandbox:21.0.55109.0`.
 

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -153,6 +154,22 @@ func docker(t *testing.T, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	return dockerContext(ctx, args...)
+}
+
+// runFlags are the docker run flags of a sandbox container, as README.md
+// and the CI workflow give them, with the seccomp profile in deploy/.
+func runFlags(t *testing.T) []string {
+	t.Helper()
+	profile, err := filepath.Abs(filepath.Join("..", "..", "deploy", "seccomp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{
+		"--cap-add", "SYS_ADMIN",
+		"--security-opt", "apparmor=unconfined",
+		"--security-opt", "systempaths=unconfined",
+		"--security-opt", "seccomp=" + profile,
+	}
 }
 
 // dockerContext is docker with the caller's deadline.
