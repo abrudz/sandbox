@@ -51,6 +51,11 @@ func main() {
 	version := readImageFile(versionFile)
 	imageDigest := readImageFile(digestFile)
 	commit := readImageFile(commitFile)
+	// A run removes its own directory when it ends; directories left by an
+	// earlier process, which exited abruptly, hold submissions nobody needs.
+	if err := os.RemoveAll(jobsDir); err != nil {
+		log.Fatalf("removing %s: %v", jobsDir, err)
+	}
 	if err := os.MkdirAll(jobsDir, 0o711); err != nil {
 		log.Fatalf("creating %s: %v", jobsDir, err)
 	}

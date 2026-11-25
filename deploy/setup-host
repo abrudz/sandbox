@@ -104,6 +104,24 @@ install_packages ufw unattended-upgrades
 # Unattended upgrades, with a reboot when an upgrade needs one.
 install_file "$here/unattended-upgrades.conf" /etc/apt/apt.conf.d/60sandbox-unattended-upgrades 644
 
+# Crashes. A run can crash itself at will, and a crash handler such as
+# apport runs as root on the host; apport's service also points the core
+# pattern at apport whenever it starts. The sysctl file applies at every
+# boot.
+apport_state=$(systemctl is-enabled apport.service 2>/dev/null || true)
+case $apport_state in
+"" | not-found | masked) ;;
+*)
+	systemctl mask --now apport.service
+	changed "masked apport.service, which was $apport_state"
+	;;
+esac
+install_file "$here/60-sandbox-core.conf" /etc/sysctl.d/60-sandbox-core.conf 644
+if [ "$(sysctl -n kernel.core_pattern)" != core ]; then
+	sysctl -q -p /etc/sysctl.d/60-sandbox-core.conf
+	changed "set kernel.core_pattern to core"
+fi
+
 # The firewall: the rules come first, so that enabling it never cuts off
 # SSH. 443/udp carries HTTP/3.
 for rule in 22/tcp 80/tcp 443/tcp 443/udp; do
