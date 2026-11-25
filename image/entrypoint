@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Entry point of the sandbox image. Runs as root in a privileged container
-# with a private cgroup namespace, where /sys/fs/cgroup is the container's
-# own cgroup.
+# Entry point of the sandbox image. Runs as root in a container with
+# CAP_SYS_ADMIN, AppArmor unconfined and a private cgroup namespace, where
+# /sys/fs/cgroup is the container's own cgroup (see README.md for the
+# docker run flags).
 #
 # nsjail puts each run in a child cgroup with cpu, memory and pids limits,
 # so those controllers must be enabled for child cgroups. cgroup v2 refuses
@@ -13,6 +14,10 @@
 set -euo pipefail
 
 cgroup=/sys/fs/cgroup
+
+# Docker mounts the cgroup filesystem read-only in a container that is not
+# privileged; nsjail creates a cgroup for every run.
+mount -o remount,rw "$cgroup"
 
 mkdir -p "$cgroup/init"
 # cgroup.procs shrinks as processes leave it, and reading it while moving

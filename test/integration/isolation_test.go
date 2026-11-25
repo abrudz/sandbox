@@ -177,6 +177,21 @@ errno←⊃memcpy 1 __errno_location 4
 	assertRunLines(t, r, "¯1 1")
 }
 
+func TestRunCannotTurnOffAddressSpaceRandomisation(t *testing.T) {
+	// 262144 is ADDR_NO_RANDOMIZE. nsjail's policy allows personality;
+	// Docker's seccomp profile allows five personalities, not this one, and
+	// fails the call with EPERM.
+	r := run(t, `⎕NA'I4 libc.so.6|personality U8'
+⎕NA'P libc.so.6|__errno_location'
+⎕NA'libc.so.6|memcpy >I4[1] P P'
+result←personality 262144
+errno←⊃memcpy 1 __errno_location 4
+⎕←result errno
+`, "")
+
+	assertRunLines(t, r, "¯1 1")
+}
+
 func TestRunIsUnprivilegedAndSeesOnlyItsOwnProcesses(t *testing.T) {
 	r := run(t, `{⎕←⍵}¨⎕SH'id -u; grep CapEff /proc/self/status; cat /proc/[0-9]*/comm'`+"\n", "")
 
