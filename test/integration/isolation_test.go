@@ -192,6 +192,85 @@ errno←⊃memcpy 1 __errno_location 4
 	assertRunLines(t, r, "¯1 1")
 }
 
+// systemCall makes the x86_64 system call nr with up to six arguments from a
+// run, through ⎕NA and the C library's syscall, and returns the run with
+// one output line: the result and errno.
+func systemCall(t *testing.T, nr int, args ...int64) runResponse {
+	t.Helper()
+	all := []string{"0", "0", "0", "0", "0", "0"}
+	for i, a := range args {
+		all[i] = strings.Replace(strconv.FormatInt(a, 10), "-", "¯", 1)
+	}
+	return run(t, fmt.Sprintf(`⎕NA'I8 libc.so.6|syscall I8 I8 I8 I8 I8 I8 I8'
+⎕NA'P libc.so.6|__errno_location'
+⎕NA'libc.so.6|memcpy >I4[1] P P'
+result←syscall %d %s
+errno←⊃memcpy 1 __errno_location 4
+⎕←result errno
+`, nr, strings.Join(all, " ")), "")
+}
+
+func TestRarelyNeededSystemCallsFailWithEPERM(t *testing.T) {
+	// The arguments are ones the kernel accepts from an unprivileged process,
+	// or rejects with an error other than EPERM, so EPERM comes only from a
+	// seccomp filter. Docker's profile already refuses the NUMA calls here.
+	for _, c := range []struct {
+		name string
+		nr   int
+		args []int64
+	}{
+		{"fanotify_init", 300, []int64{0x200, 0}}, // FAN_REPORT_FID, unprivileged since Linux 5.13
+		{"modify_ldt", 154, []int64{0, 0, 0}},     // read no bytes of the LDT
+		{"vmsplice", 278, []int64{-1, 0, 0, 0}},
+		{"name_to_handle_at", 303, []int64{-1, 0, 0, 0, 0}},
+		{"mbind", 237, nil},
+		{"migrate_pages", 256, nil},
+		{"move_pages", 279, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assertRunLines(t, systemCall(t, c.nr, c.args...), "¯1 1")
+		})
+	}
+}
+
+func TestSocketsOtherThanUnixAndIPFailWithEPERM(t *testing.T) {
+	// socket is system call 41. Some of these families need a capability the
+	// run lacks, or a kernel module, and fail anyway; AF_NETLINK needs
+	// neither.
+	for _, c := range []struct {
+		name         string
+		family, kind int64
+	}{
+		{"AF_NETLINK", 16, 3}, // SOCK_RAW
+		{"AF_PACKET", 17, 3},
+		{"AF_KEY", 15, 3},
+		{"AF_TIPC", 30, 5}, // SOCK_SEQPACKET
+		{"AF_ALG", 38, 5},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assertRunLines(t, systemCall(t, 41, c.family, c.kind, 0), "¯1 1")
+		})
+	}
+}
+
+func TestUnixAndIPSocketsOpen(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		family int64
+	}{
+		{"AF_UNIX", 1},
+		{"AF_INET", 2},
+		{"AF_INET6", 10},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := systemCall(t, 41, c.family, 1, 0) // SOCK_STREAM
+			if got := lines(r.Stdout); len(got) != 1 || strings.HasPrefix(got[0], "¯") {
+				t.Errorf("output lines %q, want a descriptor and errno; %s", got, describe(r))
+			}
+		})
+	}
+}
+
 func TestRunIsUnprivilegedAndSeesOnlyItsOwnProcesses(t *testing.T) {
 	r := run(t, `{⎕←⍵}¨⎕SH'id -u; grep CapEff /proc/self/status; cat /proc/[0-9]*/comm'`+"\n", "")
 
