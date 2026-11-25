@@ -3,10 +3,13 @@
 package integration
 
 import (
+	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // allowedCapabilities are the capabilities a sandbox container may hold,
@@ -128,5 +131,43 @@ func TestContainerHasOnlyDockersDefaultDevices(t *testing.T) {
 	}
 	if len(extra) > 0 {
 		t.Errorf("/dev holds %q beyond Docker's default entries", extra)
+	}
+}
+
+func TestTheContainerRefusesToStartInTheHostsCgroupNamespace(t *testing.T) {
+	// The entry point would create this leaf in whatever cgroup is the root
+	// of its namespace; in the host's namespace, that is the host's root.
+	const hostLeaf = "/sys/fs/cgroup/init"
+	if _, err := os.Stat(hostLeaf); err == nil {
+		t.Fatalf("%s exists before the container starts", hostLeaf)
+	}
+	name := fmt.Sprintf("sandbox-test-%d", time.Now().UnixNano())
+	args := append([]string{"run", "-d"}, runFlags(t)...)
+	args = append(args, "--cgroupns", "host", "--name", name, env(t, "SANDBOX_IMAGE"))
+	if out, err := docker(t, args...); err != nil {
+		t.Fatalf("starting a container in the host's cgroup namespace: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _, _ = docker(t, "rm", "-f", name) })
+
+	var state string
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		out, err := docker(t, "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", name)
+		if err != nil {
+			t.Fatalf("inspecting %s: %v\n%s", name, err, out)
+		}
+		if state = strings.TrimSpace(out); strings.HasPrefix(state, "exited ") {
+			break
+		}
+	}
+	logs, _ := docker(t, "logs", name)
+
+	if !strings.HasPrefix(state, "exited ") || state == "exited 0" {
+		t.Errorf("15 s after starting, the container is %q; want it to have exited with an error. Its log:\n%s", state, logs)
+	}
+	if !strings.Contains(logs, "cgroup namespace") {
+		t.Errorf("the container's log does not name the cgroup namespace as the cause:\n%s", logs)
+	}
+	if _, err := os.Stat(hostLeaf); err == nil {
+		t.Errorf("the entry point created %s in the host's cgroup hierarchy", hostLeaf)
 	}
 }
