@@ -15,12 +15,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +135,10 @@ type hostConfig struct {
 	// lists here, not among the security options.
 	MaskedPaths   *[]string
 	ReadonlyPaths *[]string
+	// Memory and MemorySwap are in bytes; 0 means no limit.
+	Memory     int64
+	MemorySwap int64
+	PidsLimit  *int64
 }
 
 func sandboxHostConfig(t *testing.T) hostConfig {
@@ -193,6 +200,121 @@ func TestSetupHostInstallsTheSeccompProfile(t *testing.T) {
 
 	if !bytes.Equal(installed, readFile(t, repoPath("deploy/seccomp.json"))) {
 		t.Error("/opt/sandbox/seccomp.json differs from deploy/seccomp.json")
+	}
+}
+
+// bodyLimit is runner-api's largest valid request body with its default
+// limits: code plus input of 64 KiB and 16 arguments of 1 KiB, every byte
+// JSON-escaped as six, plus 4 KiB of framing.
+const bodyLimit = 6*(64*1024+16*1024) + 4096
+
+func TestCaddyRefusesABodyOverRunnerAPIsLimitBeforeReadingIt(t *testing.T) {
+	// The body never arrives, so only a refusal based on Content-Length
+	// can answer quickly; runner-api would wait for it.
+	body, w := io.Pipe()
+	defer w.Close()
+	req, err := http.NewRequest(http.MethodPost, env(t, "SITE_ADDRESS")+"/api/v1/run", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ContentLength = bodyLimit + 1
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	begun := time.Now()
+	resp, err := client.Do(req)
+	elapsed := time.Since(begun)
+
+	if err != nil {
+		t.Fatalf("no response within 5 s: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status %d, want 413", resp.StatusCode)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("answered after %v; a refusal before reading the body is immediate", elapsed)
+	}
+}
+
+func TestCaddyPassesABodyAtRunnerAPIsLimit(t *testing.T) {
+	run := `{"code":"⎕←1","input":"","args":[]}`
+	body := run + strings.Repeat(" ", bodyLimit-len(run))
+
+	resp, err := http.Post(env(t, "SITE_ADDRESS")+"/api/v1/run", "application/json", strings.NewReader(body))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("a %d-byte body: status %d, want 200", len(body), resp.StatusCode)
+	}
+}
+
+// memTotal is the host's memory in bytes.
+func memTotal(t *testing.T) int64 {
+	t.Helper()
+	for _, line := range strings.Split(string(readFile(t, "/proc/meminfo")), "\n") {
+		if f := strings.Fields(line); len(f) == 3 && f[0] == "MemTotal:" && f[2] == "kB" {
+			kb, err := strconv.ParseInt(f[1], 10, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return kb * 1024
+		}
+	}
+	t.Fatal("/proc/meminfo has no MemTotal")
+	return 0
+}
+
+// hostReserve is the memory kept for the operating system, Docker and Caddy.
+const hostReserve = 512 << 20
+
+func TestSandboxContainerMemoryLimitLeavesAReserveForTheHost(t *testing.T) {
+	hc := sandboxHostConfig(t)
+	total := memTotal(t)
+
+	if hc.Memory <= 0 {
+		t.Fatal("the sandbox container has no memory limit")
+	}
+	if hc.Memory > total-hostReserve {
+		t.Errorf("memory limit %d bytes of %d leaves less than %d for the host", hc.Memory, total, hostReserve)
+	}
+	if hc.MemorySwap != hc.Memory {
+		t.Errorf("memory plus swap %d bytes, want %d: no swap", hc.MemorySwap, hc.Memory)
+	}
+}
+
+// runnerReserve is the container memory kept for runner-api itself and the
+// request bodies it is reading.
+const runnerReserve = 128 << 20
+
+func TestConcurrentRunsFitWithinTheSandboxContainersLimits(t *testing.T) {
+	hc := sandboxHostConfig(t)
+	// runner-api logs its limits when it starts.
+	logs := command(t, "docker", "logs", sandboxContainer(t))
+	number := func(pattern string) int64 {
+		t.Helper()
+		m := regexp.MustCompile(pattern).FindAllStringSubmatch(logs, -1)
+		if m == nil {
+			t.Fatalf("runner-api's log has no match for %q:\n%s", pattern, logs)
+		}
+		n, err := strconv.ParseInt(m[len(m)-1][1], 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	runs := number(`(\d+) runs at once`)
+	memory := number(`memory (\d+) bytes`)
+	pids := number(`(\d+) processes;`)
+
+	if need := runs*memory + runnerReserve; hc.Memory < need {
+		t.Errorf("%d runs of %d bytes need a memory limit of at least %d bytes; it is %d", runs, memory, need, hc.Memory)
+	}
+	if hc.PidsLimit == nil || *hc.PidsLimit < runs*pids+64 {
+		t.Errorf("%d runs of %d processes need a process limit of at least %d; it is %v", runs, pids, runs*pids+64, hc.PidsLimit)
 	}
 }
 
