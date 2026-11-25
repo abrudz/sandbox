@@ -128,8 +128,8 @@ type hostConfig struct {
 	Privileged  bool
 	CapAdd      []string
 	SecurityOpt []string
-	// systempaths=unconfined leaves these empty; without it, Docker fills
-	// in its default lists, and a privileged container has none (null).
+	// The Docker CLI and Compose record systempaths=unconfined as empty
+	// lists here, not among the security options.
 	MaskedPaths   *[]string
 	ReadonlyPaths *[]string
 }
