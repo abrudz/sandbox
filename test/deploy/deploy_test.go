@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -119,6 +120,89 @@ func TestSandboxPortListensOnLoopbackOnly(t *testing.T) {
 			t.Errorf("port 8080 listens beyond loopback: %s", line)
 		}
 	}
+}
+
+// hostConfig is the part of a container's HostConfig that grants it
+// privileges.
+type hostConfig struct {
+	Privileged  bool
+	CapAdd      []string
+	SecurityOpt []string
+	// The Docker CLI and Compose record systempaths=unconfined as empty
+	// lists here, not among the security options.
+	MaskedPaths   *[]string
+	ReadonlyPaths *[]string
+}
+
+func sandboxHostConfig(t *testing.T) hostConfig {
+	t.Helper()
+	var hc hostConfig
+	out := command(t, "docker", "inspect", "-f", "{{json .HostConfig}}", sandboxContainer(t))
+	if err := json.Unmarshal([]byte(out), &hc); err != nil {
+		t.Fatalf("parsing the sandbox container's HostConfig: %v\n%s", err, out)
+	}
+	return hc
+}
+
+func TestSandboxContainerIsNotPrivilegedAndAddsOnlySysAdmin(t *testing.T) {
+	hc := sandboxHostConfig(t)
+
+	if hc.Privileged {
+		t.Error("the sandbox container is privileged")
+	}
+	// Docker accepts a capability with or without its CAP_ prefix.
+	if len(hc.CapAdd) != 1 || strings.TrimPrefix(hc.CapAdd[0], "CAP_") != "SYS_ADMIN" {
+		t.Errorf("the sandbox container adds capabilities %q, want SYS_ADMIN alone", hc.CapAdd)
+	}
+}
+
+func TestSandboxContainerUnconfinesAppArmorAndMaskedPathsAndUsesTheSeccompProfile(t *testing.T) {
+	hc := sandboxHostConfig(t)
+
+	if !slices.Contains(hc.SecurityOpt, "apparmor=unconfined") {
+		t.Errorf("the sandbox container's security options %q lack apparmor=unconfined", hc.SecurityOpt)
+	}
+	for name, paths := range map[string]*[]string{"masked": hc.MaskedPaths, "read-only": hc.ReadonlyPaths} {
+		switch {
+		case paths == nil:
+			t.Errorf("the sandbox container has no %s paths list, so systempaths=unconfined is not set", name)
+		case len(*paths) > 0:
+			t.Errorf("the sandbox container has %s paths %q, so systempaths=unconfined is not set", name, *paths)
+		}
+	}
+	// Docker keeps a seccomp profile in the container's configuration as
+	// seccomp= followed by the profile itself.
+	var want, got any
+	if err := json.Unmarshal(readFile(t, repoPath("deploy/seccomp.json")), &want); err != nil {
+		t.Fatalf("parsing deploy/seccomp.json: %v", err)
+	}
+	i := slices.IndexFunc(hc.SecurityOpt, func(o string) bool { return strings.HasPrefix(o, "seccomp=") })
+	if i < 0 {
+		t.Fatalf("the sandbox container's security options %q have no seccomp profile", hc.SecurityOpt)
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(hc.SecurityOpt[i], "seccomp=")), &got); err != nil {
+		t.Fatalf("parsing the sandbox container's seccomp profile: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Error("the sandbox container's seccomp profile differs from deploy/seccomp.json")
+	}
+}
+
+func TestSetupHostInstallsTheSeccompProfile(t *testing.T) {
+	installed := readFile(t, "/opt/sandbox/seccomp.json")
+
+	if !bytes.Equal(installed, readFile(t, repoPath("deploy/seccomp.json"))) {
+		t.Error("/opt/sandbox/seccomp.json differs from deploy/seccomp.json")
+	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return b
 }
 
 func TestUnattendedUpgradesInstallUpdatesAndRebootWhenNeeded(t *testing.T) {
