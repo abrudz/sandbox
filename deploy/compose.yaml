@@ -1,6 +1,7 @@
 # The public instance: the sandbox behind Caddy. deploy/setup-host installs
 # this file as /opt/sandbox/compose.yaml, beside the Caddyfile, seccomp.json
-# and an .env file that sets SITE_ADDRESS and SANDBOX_IMAGE.
+# and an .env file that sets SITE_ADDRESS, SANDBOX_IMAGE and the sandbox
+# container's limits.
 name: sandbox
 
 services:
@@ -16,6 +17,12 @@ services:
       # Docker's default seccomp profile with pivot_root allowed, read when
       # the container is created.
       - seccomp=./seccomp.json
+    # deploy/setup-host derives these from the VM's memory and CPUs: the
+    # host keeps 512 MiB beyond the container's limit, and the container's
+    # concurrent runs fit within it.
+    mem_limit: ${SANDBOX_MEMORY_LIMIT}
+    memswap_limit: ${SANDBOX_MEMORY_LIMIT}
+    pids_limit: ${SANDBOX_PIDS_LIMIT}
     restart: unless-stopped
     # Longer than a run's time limit plus the time it takes to stop, so that
     # replacing the container lets its runs in progress finish.
@@ -24,6 +31,7 @@ services:
       # Caddy reaches the sandbox through the published loopback port, so
       # its connections arrive from this network's gateway.
       SANDBOX_TRUSTED_PROXIES: 172.31.254.1
+      SANDBOX_CONCURRENCY: ${SANDBOX_CONCURRENCY}
     ports:
       # Loopback only: Docker's published ports bypass the firewall.
       - "127.0.0.1:8080:8080"

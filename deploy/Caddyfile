@@ -3,5 +3,11 @@
 # certificate and redirects HTTP to HTTPS.
 {$SITE_ADDRESS} {
 	encode zstd gzip
+	# runner-api's largest valid body with its default limits (bodyLimit in
+	# internal/api/limits.go). A larger one is refused from its
+	# Content-Length, before any of it is read.
+	request_body {
+		max_size 484KiB
+	}
 	reverse_proxy 127.0.0.1:8080
 }
