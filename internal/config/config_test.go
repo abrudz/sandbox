@@ -32,6 +32,7 @@ func TestDefaultsApplyWhenNoVariableIsSet(t *testing.T) {
 		Concurrency:       runtime.NumCPU(),
 		ClientConcurrency: 2,
 		ClientRate:        30,
+		ReadConcurrency:   64,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("limits %+v, want %+v", got, want)
@@ -79,6 +80,17 @@ func TestSandboxClientRateSetsThePerMinuteLimit(t *testing.T) {
 
 	if got.ClientRate != 10 {
 		t.Fatalf("client rate %d, want 10", got.ClientRate)
+	}
+}
+
+func TestSandboxReadConcurrencySetsTheNumberOfBodiesReadAtOnce(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_READ_CONCURRENCY": "8"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.ReadConcurrency != 8 {
+		t.Fatalf("read concurrency %d, want 8", got.ReadConcurrency)
 	}
 }
 
@@ -195,6 +207,8 @@ func TestInvalidLimitsAreRejectedNamingTheVariable(t *testing.T) {
 		{"SANDBOX_CLIENT_CONCURRENCY", "0"},
 		{"SANDBOX_CLIENT_RATE", "often"},
 		{"SANDBOX_CLIENT_RATE", "0"},
+		{"SANDBOX_READ_CONCURRENCY", "many"},
+		{"SANDBOX_READ_CONCURRENCY", "0"},
 		{"SANDBOX_TRUSTED_PROXIES", "not-an-address"},
 		{"SANDBOX_TRUSTED_PROXIES", "10.0.0.0/33"},
 	} {

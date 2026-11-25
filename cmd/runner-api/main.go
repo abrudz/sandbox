@@ -71,11 +71,7 @@ func main() {
 		Commit:            commit,
 		Timeout:           limits.Timeout,
 	})
-	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := handler.HTTPServer(":8080")
 
 	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

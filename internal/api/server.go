@@ -33,6 +33,15 @@ type Options struct {
 	ClientConcurrency int
 	// ClientRate is the number of runs one client may start per minute.
 	ClientRate int
+	// ReadConcurrency is the number of run request bodies read at once.
+	ReadConcurrency int
+	// ReadTimeout is the time a request has to arrive in full, headers and
+	// body, and IdleTimeout the time a connection may wait for its next
+	// request; HTTPServer applies both.
+	ReadTimeout time.Duration
+	IdleTimeout time.Duration
+	// ResponseTimeout is the time a run's response has to be written.
+	ResponseTimeout time.Duration
 	// TrustedProxies are the peers whose X-Forwarded-For header names the
 	// client; any other peer is the client itself.
 	TrustedProxies []netip.Prefix
@@ -75,6 +84,15 @@ func NewHandler(opts Options) *Server {
 		s.mux.Handle("GET /", http.FileServer(http.Dir(opts.WebDir)))
 	}
 	return s
+}
+
+// HTTPServer returns an http.Server that serves s on addr.
+func (s *Server) HTTPServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           s,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 }
 
 // ServeHTTP implements http.Handler. While draining, every new request

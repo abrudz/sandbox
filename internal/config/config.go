@@ -40,6 +40,9 @@ type Limits struct {
 	// ClientRate is the number of runs one client may start per minute
 	// (SANDBOX_CLIENT_RATE).
 	ClientRate int
+	// ReadConcurrency is the number of run request bodies read at once
+	// across all clients (SANDBOX_READ_CONCURRENCY).
+	ReadConcurrency int
 	// TrustedProxies are the peers whose X-Forwarded-For header identifies
 	// the client (SANDBOX_TRUSTED_PROXIES: comma-separated addresses or
 	// networks). Without them, the peer address is the client.
