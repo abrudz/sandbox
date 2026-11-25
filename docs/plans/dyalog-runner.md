@@ -116,7 +116,9 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 ```
 
 - `stdout` and `stderr` hold exactly what the interpreter wrote, as UTF-8 strings (invalid byte sequences replaced by U+FFFD). The API does not alter line endings; presentation is the client's concern.
-- Errors: `400` malformed request, including anything but whitespace after the JSON value; `408` request not received in full within 15 s; `413` request too large; `429` no free concurrency slot, or client over its concurrent or per-minute limit; `503` too many request bodies being read, sandbox unavailable, or shutting down.
+- The request must have `Content-Type: application/json`. A browser sends a cross-origin JSON request only after a CORS preflight, which is never granted, so other web pages cannot make their visitors' browsers start runs.
+- The per-client limits treat each IPv4 address, and each IPv6 /64, as one client.
+- Errors: `400` malformed request, including anything but whitespace after the JSON value and an argument containing NUL; `408` request not received in full within 15 s; `413` request too large; `415` any other `Content-Type`; `429` no free concurrency slot, or client over its concurrent or per-minute limit; `503` too many request bodies being read, sandbox unavailable, or shutting down.
 - A run's slot is freed when the run ends. A response the client has not read within 10 s is abandoned, and a connection idle for 3 minutes is closed; Caddy keeps an idle upstream connection for 2 minutes, so it never sends a request on a connection being closed.
 - `GET /api/v1/version` returns `{"dyalogVersion": "...", "imageDigest": "sha256:...", "commit": "...", "timeoutMs": 10000}`: the first three from the image labels, and the run time limit.
 - `GET /healthz` returns `200` when the API is serving.

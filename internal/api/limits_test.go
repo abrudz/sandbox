@@ -198,6 +198,63 @@ func TestPostRunAnswers400ForDataAfterTheJSONValue(t *testing.T) {
 	}
 }
 
+// unreadBody is a request body that records whether it was read.
+type unreadBody struct{ read bool }
+
+func (b *unreadBody) Read([]byte) (int, error) {
+	b.read = true
+	return 0, io.EOF
+}
+
+func TestPostRunAnswers415BeforeReadingABodyThatIsNotJSON(t *testing.T) {
+	h := handler(&fakeExecutor{}, nil)
+
+	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
+		body := &unreadBody{}
+		if got := postReader(h, "192.0.2.1", body, "Content-Type", contentType); got != http.StatusUnsupportedMediaType {
+			t.Errorf("Content-Type %q: status %d, want 415", contentType, got)
+		}
+		if body.read {
+			t.Errorf("Content-Type %q: the body was read", contentType)
+		}
+	}
+	for _, contentType := range []string{"application/json", "application/json; charset=utf-8", "Application/JSON"} {
+		if got := post(h, "192.0.2.1", okBody, "Content-Type", contentType); got != http.StatusOK {
+			t.Errorf("Content-Type %q: status %d, want 200", contentType, got)
+		}
+	}
+}
+
+func TestARunRequestFromAnotherOriginGetsNoCORSPermission(t *testing.T) {
+	h := handler(&fakeExecutor{}, nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/run", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	// Without this header a browser sends no cross-origin JSON request.
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("preflight answered with Access-Control-Allow-Origin %q", got)
+	}
+}
+
+func TestPostRunAnswers400ForAnArgumentContainingNUL(t *testing.T) {
+	fake := &fakeExecutor{}
+	h := handler(fake, nil)
+
+	got := post(h, "192.0.2.1", `{"code":"","input":"","args":["a\u0000b"]}`)
+
+	if got != http.StatusBadRequest {
+		t.Errorf("status %d, want 400", got)
+	}
+	if fake.got.Args != nil {
+		t.Errorf("the run started with arguments %q", fake.got.Args)
+	}
+}
+
 func TestPostRunAnswers413WhenCodeAndInputExceedTheLimit(t *testing.T) {
 	h := handler(&fakeExecutor{}, func(o *api.Options) { o.RequestLimit = 1024 })
 
@@ -398,6 +455,51 @@ func TestClientsBehindATrustedProxyAreToldApartByXForwardedFor(t *testing.T) {
 	// client's own claims and do not change who the client is.
 	if got := post(h, "127.0.0.1", okBody, "X-Forwarded-For", "198.51.100.9, 203.0.113.1"); got != http.StatusTooManyRequests {
 		t.Errorf("first client again, with a forged entry: status %d, want 429", got)
+	}
+}
+
+func TestIPv6PeersInTheSame64AreOneClient(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.ClientRate = 1 })
+
+	if got := post(h, "[2001:db8:1:2::1]", okBody); got != http.StatusOK {
+		t.Fatalf("first address: status %d, want 200", got)
+	}
+	if got := post(h, "[2001:db8:1:2:ffff::9]", okBody); got != http.StatusTooManyRequests {
+		t.Errorf("another address in the same /64: status %d, want 429", got)
+	}
+	if got := post(h, "[2001:db8:1:3::1]", okBody); got != http.StatusOK {
+		t.Errorf("an address in another /64: status %d, want 200", got)
+	}
+}
+
+func TestIPv6ClientsNamedByATrustedProxyAreGroupedBy64(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) {
+		o.ClientRate = 1
+		o.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
+	})
+
+	if got := post(h, "127.0.0.1", okBody, "X-Forwarded-For", "2001:db8:1:2::1"); got != http.StatusOK {
+		t.Fatalf("first address: status %d, want 200", got)
+	}
+	if got := post(h, "127.0.0.1", okBody, "X-Forwarded-For", "2001:db8:1:2::2"); got != http.StatusTooManyRequests {
+		t.Errorf("another address in the same /64: status %d, want 429", got)
+	}
+	if got := post(h, "127.0.0.1", okBody, "X-Forwarded-For", "2001:db8:1:3::1"); got != http.StatusOK {
+		t.Errorf("an address in another /64: status %d, want 200", got)
+	}
+}
+
+func TestIPv4MappedAddressesKeepTheirFullAddress(t *testing.T) {
+	h := handler(&fakeExecutor{}, func(o *api.Options) { o.ClientRate = 1 })
+
+	if got := post(h, "[::ffff:192.0.2.1]", okBody); got != http.StatusOK {
+		t.Fatalf("first address: status %d, want 200", got)
+	}
+	if got := post(h, "[::ffff:192.0.2.2]", okBody); got != http.StatusOK {
+		t.Errorf("a neighbouring IPv4 address: status %d, want 200", got)
+	}
+	if got := post(h, "192.0.2.1", okBody); got != http.StatusTooManyRequests {
+		t.Errorf("the first address written as IPv4: status %d, want 429", got)
 	}
 }
 
