@@ -66,7 +66,7 @@ The plan, [docs/plans/dyalog-runner.md](docs/plans/dyalog-runner.md), describes 
 
 ## The public instance
 
-The public instance runs on a dedicated Ubuntu 24.04 VM that holds no secrets. Caddy serves the site over TLS and passes requests to the sandbox container, which listens on the VM's loopback address only and runs with the four options described under Running it locally. Before provisioning, point the domain's DNS records (A, and AAAA for IPv6) at the VM. Then, on the VM:
+The public instance runs on a dedicated Ubuntu 24.04 VM whose only secret is Caddy's TLS key. Caddy serves the site over TLS and passes requests to the sandbox container, which listens on the VM's loopback address only and runs with the four options described under Running it locally. Caddy refuses a request body larger than runner-api accepts. The container's memory limit is the VM's memory less 512 MiB, with no swap; it runs one run per CPU, or fewer so that every run fits within that limit, and has a process limit to match. Before provisioning, point the domain's DNS records (A, and AAAA for IPv6) at the VM. Then, on the VM:
 
 ```
 git clone https://github.com/abrudz/sandbox
@@ -77,7 +77,7 @@ sudo deploy/setup-host
 `deploy/setup-host` does the following:
 - installs Docker Engine and compose, `ufw` and unattended upgrades;
 - allows SSH, HTTP and HTTPS through the firewall and nothing else;
-- installs the instance in `/opt/sandbox`, with the seccomp profile, and the daily update as `sandbox-update.service` and `sandbox-update.timer`;
+- installs the instance in `/opt/sandbox`, with the seccomp profile and limits sized to the VM, and the daily update as `sandbox-update.service` and `sandbox-update.timer`;
 - starts the instance.
 
 It reports each change it makes, and running it again reports `No changes`. Two environment variables change its settings:
