@@ -156,8 +156,8 @@ Added:
 ### Publishing and updates
 
 - `.github/workflows/publish.yml` runs on every push to `main` and daily. It resolves the digest of `docker.io/dyalog/dyalog:latest`.
-- It builds and tests on every push, and on the daily run only when the upstream digest differs from the label on the published image. It builds the image, starts it with the flags in Context on the runner, and runs the integration and UI suites against it.
-- If every suite passes, it pushes `ghcr.io/abrudz/sandbox:latest` and `ghcr.io/abrudz/sandbox:<dyalog-version>`. If any suite fails, nothing is published and the workflow fails.
+- It builds and tests on every push, and on the daily run when the upstream digest differs from the label on the published image or that image is more than six and a half days old (`scripts/needs-build`), so the image's other packages are refreshed at least weekly. `.github/workflows/image.yml` builds the image in one job and saves it as a run artifact; a second job loads it, starts it with the flags in Context on the runner, and runs the integration and UI suites against it.
+- If every suite passes, a third job pushes `ghcr.io/abrudz/sandbox:latest` and `ghcr.io/abrudz/sandbox:<dyalog-version>`. It is the only job that can write packages, and it runs nothing from the repository or the suites' dependencies: it loads the artifact and checks its image ID against the build job's before pushing. The build and test jobs have read-only tokens, no checkout keeps its token, and every action is pinned to a commit. If any suite fails, nothing is published and the workflow fails.
 - There is no human approval step; the test suites are the gate. The version tags allow manual rollback.
 - The local instance updates with `docker pull`. The public instance runs a daily systemd timer that runs `docker compose pull` and `docker compose up -d`. The compose file's stop grace period is longer than the wall-clock limit, so runs in progress finish before the old container exits.
 
@@ -247,7 +247,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 
 **7. Automated publishing**
 - A push to `main` publishes `latest` and the version tag only after every suite passes against the built image.
-- A daily run with an unchanged upstream digest publishes nothing; a daily run with a changed digest rebuilds, tests and publishes.
+- A daily run with an unchanged upstream digest and a published image under a week old publishes nothing; otherwise it rebuilds, tests and publishes.
 - When any suite fails, nothing is published and the workflow fails.
 - The published image's labels and `/api/v1/version` report the same upstream digest, Dyalog version and commit.
 - Verified with manual `workflow_dispatch` runs; the workflow takes an optional upstream image override, so the failure path can be exercised with a broken image.

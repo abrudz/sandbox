@@ -1,8 +1,11 @@
 name: Image
 
-# Builds the image with scripts/build-image, runs the integration and UI
-# suites against it, and, when asked to, pushes it to GHCR. ci.yml calls
-# this on every push without publishing; publish.yml calls it to publish.
+# Builds the image with scripts/build-image and runs the integration and UI
+# suites against it. ci.yml calls this on every push; publish.yml calls it
+# and then pushes the image the build job saved, which it checks against
+# the image-id output. Neither job here can write packages, and no checkout
+# leaves its token on disk, so nothing the suites install can push an image
+# or alter the one that is pushed.
 on:
   workflow_call:
     inputs:
@@ -14,30 +17,79 @@ on:
         description: Digest to pin the upstream image to; empty means its current digest
         type: string
         default: ""
-      publish:
-        description: Push latest and the Dyalog version tag to GHCR once every suite has passed
-        type: boolean
-        default: false
+    outputs:
+      image-id:
+        description: ID of the image in the sandbox-image artifact
+        value: ${{ jobs.build.outputs.image-id }}
+
+permissions:
+  contents: read
+
+env:
+  SANDBOX_IMAGE: sandbox:ci
 
 jobs:
-  image:
-    name: Build and test
+  build:
+    name: Build
     runs-on: ubuntu-24.04
-    env:
-      SANDBOX_IMAGE: sandbox:ci
-      SANDBOX_CONTAINER: sandbox-ci
-      SANDBOX_URL: http://127.0.0.1:8000
+    outputs:
+      image-id: ${{ steps.save.outputs.image-id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: go.mod
+          persist-credentials: false
 
       - name: Build image
         env:
           UPSTREAM: ${{ inputs.upstream }}
           DIGEST: ${{ inputs.digest }}
         run: scripts/build-image "$SANDBOX_IMAGE" "$UPSTREAM" "$DIGEST"
+
+      - name: Save image
+        id: save
+        run: |
+          echo "image-id=$(docker image inspect -f '{{.Id}}' "$SANDBOX_IMAGE")" >> "$GITHUB_OUTPUT"
+          docker save "$SANDBOX_IMAGE" | zstd -T0 -q -o sandbox-image.tar.zst
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sandbox-image
+          path: sandbox-image.tar.zst
+          # Already compressed.
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      SANDBOX_CONTAINER: sandbox-ci
+      SANDBOX_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sandbox-image
+
+      - name: Load image
+        env:
+          IMAGE_ID: ${{ needs.build.outputs.image-id }}
+        run: |
+          zstd -dc sandbox-image.tar.zst | docker load
+          rm sandbox-image.tar.zst
+          loaded=$(docker image inspect -f '{{.Id}}' "$SANDBOX_IMAGE")
+          if [ "$loaded" != "$IMAGE_ID" ]; then
+            echo "::error::The artifact holds $loaded, not the image the build job built, $IMAGE_ID."
+            exit 1
+          fi
 
       - name: Start container
         # The flags are README.md's; runFlags in test/integration gives the
@@ -61,7 +113,7 @@ jobs:
       - name: Integration tests
         run: go test -tags integration -count=1 -v ./test/integration/...
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ !cancelled() }}
         with:
           node-version: 26
@@ -78,22 +130,6 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install chromium
           npx playwright test
-
-      # Runs only when every step above succeeded, so an image that fails
-      # any suite is never pushed.
-      - name: Publish
-        if: inputs.publish
-        env:
-          REPOSITORY: ghcr.io/${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$SANDBOX_IMAGE")
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          for tag in latest "$version"; do
-            docker tag "$SANDBOX_IMAGE" "$REPOSITORY:$tag"
-            docker push "$REPOSITORY:$tag"
-          done
-          echo "::notice::Published $REPOSITORY:latest and $REPOSITORY:$version"
 
       - name: Container logs
         if: always()

@@ -2,7 +2,7 @@
 
 A web service that runs short Dyalog APL programs, with Try It Online's interface for APL. Every run is jailed by nsjail: it has no network, nothing it writes survives it, and its time, CPU, memory, disk and processes are limited. The public instance is to be served at https://dyalog.run.
 
-The whole service is one container image, `ghcr.io/abrudz/sandbox`, built on Dyalog's official `docker.io/dyalog/dyalog:latest`. It is rebuilt, tested and republished when Dyalog publishes a new image.
+The whole service is one container image, `ghcr.io/abrudz/sandbox`, built on Dyalog's official `docker.io/dyalog/dyalog:latest`. It is rebuilt, tested and republished when Dyalog publishes a new image, and at least weekly for updates to its other packages.
 
 ## Running it locally
 
@@ -108,7 +108,7 @@ The plan in [docs/plans/](docs/plans/) describes the architecture and the work. 
 - `node --test test/ui/codec.test.js` tests the frontend's permalink code.
 - Linters: `gofmt`, `go vet` and `staticcheck` for Go, `shellcheck` for the scripts.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs these on every push. It also builds the image, runs the integration suite (`test/integration`) and the browser suite (`test/ui`) against it, and provisions a runner with `deploy/setup-host` to run the deployment suite (`test/deploy`).
-- [`.github/workflows/publish.yml`](.github/workflows/publish.yml) publishes the image.
+- [`.github/workflows/publish.yml`](.github/workflows/publish.yml) publishes the image. Only its last job can push packages, and it runs nothing from the repository: it pushes the image the build job saved once the suites have passed. `go test ./test/workflows/` checks this, and that every action is pinned to a commit.
 
 ## Licence
 

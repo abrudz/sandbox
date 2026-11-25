@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# needs-build UPSTREAM_DIGEST BUILT_FROM CREATED [NOW]
+#
+# Decides whether a daily publish run builds. It builds when the upstream
+# image's digest, UPSTREAM_DIGEST, differs from BUILT_FROM, the digest the
+# published image was built from, or when the published image, created at
+# CREATED, is more than six and a half days old, so that the image's other
+# packages are refreshed at least weekly. An empty or unreadable BUILT_FROM
+# or CREATED counts as a change. NOW, an RFC 3339 time, defaults to the
+# present. Exits 0 to build and 1 not to, saying why on stdout.
+set -euo pipefail
+
+if [ $# -lt 3 ] || [ $# -gt 4 ]; then
+	echo "usage: $0 UPSTREAM_DIGEST BUILT_FROM CREATED [NOW]" >&2
+	exit 2
+fi
+upstream=$1 built_from=$2 created=$3
+now=$(date -u -d "${4:-now}" +%s)
+
+if [ "$built_from" != "$upstream" ]; then
+	echo "The published image was built from ${built_from:-an unknown digest}, not $upstream."
+	exit 0
+fi
+# Registries report creation times in RFC 3339, which date reads; date also
+# reads phrases such as "yesterday", which are not creation times.
+rfc3339='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+if ! [[ $created =~ $rfc3339 ]] || ! built=$(date -u -d "$created" +%s 2>/dev/null); then
+	echo "The published image's creation time, \"$created\", cannot be read."
+	exit 0
+fi
+# Six and a half days: a daily check at the same time each day rebuilds an
+# image built minutes after the check a week before.
+if [ $((now - built)) -gt $((13 * 12 * 3600)) ]; then
+	echo "The published image was built at $created, more than six and a half days ago."
+	exit 0
+fi
+echo "The published image was built from $upstream at $created; nothing to build."
+exit 1
