@@ -16,7 +16,8 @@
 #
 # It installs Docker Engine and compose (unless present), ufw and unattended
 # upgrades; opens SSH, HTTP and HTTPS only; installs the instance in
-# /opt/sandbox and the daily update timer; and starts the instance. Each
+# /opt/sandbox, with limits sized to the host's memory and CPUs, and the
+# daily update timer; and starts the instance. Each
 # change is reported as it is made, and a run that finds nothing to change
 # reports "No changes".
 set -euo pipefail
@@ -32,6 +33,23 @@ sandbox_image=${SANDBOX_IMAGE:-ghcr.io/abrudz/sandbox:latest}
 dir=/opt/sandbox
 compose=(docker compose -f "$dir/compose.yaml")
 changes=0
+
+# The sandbox container's limits. The host keeps 512 MiB beyond the
+# container's memory limit for the operating system, Docker and Caddy. The
+# container keeps 128 MiB for runner-api and the request bodies it reads;
+# the rest holds the runs, at most one per CPU, each with runner-api's
+# default limits of 512 MiB and 64 processes.
+mem_total=$(($(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo) * 1024))
+memory_limit=$((mem_total - (512 << 20)))
+concurrency=$(((memory_limit - (128 << 20)) / (512 << 20)))
+if [ "$concurrency" -gt "$(nproc)" ]; then
+	concurrency=$(nproc)
+fi
+if [ "$concurrency" -lt 1 ]; then
+	echo "$0: one run needs 1152 MiB of memory on the host, which has $((mem_total >> 20)) MiB" >&2
+	exit 1
+fi
+pids_limit=$((concurrency * 64 + 256))
 
 changed() {
 	echo "Changed: $*"
@@ -106,7 +124,12 @@ fi
 # The instance's files.
 env_file=$(mktemp)
 trap 'rm -f "$env_file"' EXIT
-printf 'SITE_ADDRESS=%s\nSANDBOX_IMAGE=%s\n' "$site_address" "$sandbox_image" >"$env_file"
+printf '%s\n' \
+	"SITE_ADDRESS=$site_address" \
+	"SANDBOX_IMAGE=$sandbox_image" \
+	"SANDBOX_MEMORY_LIMIT=$memory_limit" \
+	"SANDBOX_CONCURRENCY=$concurrency" \
+	"SANDBOX_PIDS_LIMIT=$pids_limit" >"$env_file"
 install_file "$env_file" "$dir/.env" 644
 install_file "$here/compose.yaml" "$dir/compose.yaml" 644
 install_file "$here/Caddyfile" "$dir/Caddyfile" 644
