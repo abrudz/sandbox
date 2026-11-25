@@ -13,6 +13,7 @@ package deploy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -212,17 +213,20 @@ func TestCaddyRefusesABodyOverRunnerAPIsLimitBeforeReadingIt(t *testing.T) {
 	// The body never arrives, so only a refusal based on Content-Length
 	// can answer quickly; runner-api would wait for it.
 	body, w := io.Pipe()
-	defer w.Close()
-	req, err := http.NewRequest(http.MethodPost, env(t, "SITE_ADDRESS")+"/api/v1/run", body)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// A request that fails waits for its body to be written, so the body
+	// ends when the request is given up.
+	context.AfterFunc(ctx, func() { w.Close() })
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env(t, "SITE_ADDRESS")+"/api/v1/run", body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.ContentLength = bodyLimit + 1
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Second}
 
 	begun := time.Now()
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	elapsed := time.Since(begun)
 
 	if err != nil {
