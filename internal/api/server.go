@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -161,6 +162,12 @@ type runResponse struct {
 // run executes one program. Every completed run answers 200, whatever the
 // program's exit status; 503 means the sandbox could not run it.
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
+	// A cross-origin JSON request needs a CORS preflight, which is never
+	// granted, so web pages cannot make their visitors' browsers start runs.
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		http.Error(w, "a run request must have Content-Type: application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 	client := s.clientOf(r)
 	read, leave, status, reason := s.enter(client)
 	if status != 0 {
@@ -258,6 +265,10 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request) (runRequest, int
 	for _, arg := range req.Args {
 		if len(arg) > maxArgLen {
 			return req, http.StatusBadRequest, fmt.Sprintf("an argument may be at most %d bytes", maxArgLen)
+		}
+		// The arguments reach nsjail's command line, which cannot hold NUL.
+		if strings.ContainsRune(arg, 0) {
+			return req, http.StatusBadRequest, "an argument may not contain NUL"
 		}
 	}
 	if s.opts.RequestLimit > 0 && len(req.Code)+len(req.Input) > s.opts.RequestLimit {

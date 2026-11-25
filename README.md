@@ -58,6 +58,7 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 
 - `POST /api/v1/run` with `{"code": "⎕←2+2", "input": "", "args": []}` runs the program and answers with its `stdout`, `stderr`, `exitCode`, `signal`, `timedOut`, whether each output was truncated, its wall, user and system time, and `dyalogVersion`.
   An argument `NAME=value` sets the interpreter's configuration parameter `NAME`, as on TIO; the other arguments go to the program.
+  The request must have `Content-Type: application/json`. The per-client limits treat each IPv4 address, and each IPv6 /64, as one client.
 - `GET /api/v1/version` answers with `dyalogVersion`, `imageDigest` (the digest of the `dyalog/dyalog` image the image was built from), `commit`, and `timeoutMs`, the wall-clock limit of one run.
 - `GET /healthz` answers 200 while the service is serving.
 

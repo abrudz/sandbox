@@ -144,7 +144,7 @@ func (a *admission) sweep(now time.Time) {
 func (s *Server) clientOf(r *http.Request) string {
 	peer := peerAddr(r)
 	if !s.trusted(peer) {
-		return peer.String()
+		return clientKey(peer)
 	}
 	entries := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 	for _, entry := range slices.Backward(entries) {
@@ -157,10 +157,21 @@ func (s *Server) clientOf(r *http.Request) string {
 			return entry
 		}
 		if addr = addr.Unmap(); !s.trusted(addr) {
-			return addr.String()
+			return clientKey(addr)
 		}
 	}
-	return peer.String()
+	return clientKey(peer)
+}
+
+// clientKey identifies the client at addr: an IPv4 address, or an IPv6
+// /64, the smallest network a host is usually given.
+func clientKey(addr netip.Addr) string {
+	if addr.Is6() {
+		if p, err := addr.WithZone("").Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return addr.String()
 }
 
 func peerAddr(r *http.Request) netip.Addr {

@@ -79,6 +79,28 @@ func TestTheServiceAnswers400ForMalformedJSONAnd413ForAnOversizedRequest(t *test
 	}
 }
 
+func TestTheServiceAnswers415ForARunRequestThatIsNotJSON(t *testing.T) {
+	url := env(t, "SANDBOX_URL")
+
+	resp, err := client.Post(url+"/api/v1/run", "text/plain", strings.NewReader(`{"code":"⎕←1","input":"","args":[]}`))
+
+	if err != nil {
+		t.Fatalf("POST /api/v1/run: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Errorf("Content-Type text/plain: status %d, want 415", resp.StatusCode)
+	}
+}
+
+func TestTheServiceAnswers400ForAnArgumentContainingNUL(t *testing.T) {
+	url := env(t, "SANDBOX_URL")
+
+	if status, body := post(t, url, `{"code":"⎕←1","input":"","args":["a\u0000b"]}`); status != http.StatusBadRequest {
+		t.Errorf("status %d, want 400: %s", status, body)
+	}
+}
+
 func TestSandboxConcurrencySetsTheNumberOfSlots(t *testing.T) {
 	url, container := startContainer(t, "SANDBOX_CONCURRENCY=1")
 	first := runInBackground(url, "⎕DL 3\n⎕←'finished'\n")
