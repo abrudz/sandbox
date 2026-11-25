@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# published-created IMAGE
+#
+# Prints the creation time of IMAGE as it is in its registry, in RFC 3339.
+# Prints nothing, and reports why on stderr, when IMAGE cannot be read or
+# has no creation time; the caller then treats the image as out of date.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: $0 IMAGE" >&2
+	exit 2
+fi
+if ! config=$(docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>&1); then
+	echo "$0: cannot read $1: $config" >&2
+	exit 0
+fi
+# A single-platform image has one configuration; an index has one per
+# platform, all built together.
+created=$(jq -r '[.. | .created? | strings] | first // empty' <<<"$config")
+if [ -z "$created" ]; then
+	echo "$0: $1 has no creation time" >&2
+fi
+printf '%s' "$created"
