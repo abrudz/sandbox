@@ -9,7 +9,7 @@ The deliverable is one container image that runs the whole service:
 ```
 docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
   --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
-  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+  --cgroupns private -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 The backend is new; the frontend is taken from TIO, which is MIT-licensed:
@@ -268,13 +268,13 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
   docker build -t sandbox -f image/Containerfile .
   docker run -d --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
     --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
-    --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
+    --cgroupns private --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
   SANDBOX_URL=http://localhost:8000 go test -tags integration ./test/integration/...
   (cd test/ui && SANDBOX_URL=http://localhost:8000 npx playwright test)
   ```
 
   Results: `gh run watch` on the branch; `gh run view --log-failed` for failures.
-- Manual, by the user on a machine with Docker (not the dev container): the `docker run` command in Context, then `curl -s localhost:8000/api/v1/run -d '{"code":"⎕←2+2","input":"","args":[]}'` returns stdout starting with `4`. Open `http://localhost:8000`, enter `⎕←2+2`, press Ctrl-Enter and see `4`. Open a tio.run `apl-dyalog` permalink with its host replaced by `localhost:8000`.
+- Manual, by the user on a machine with Docker (not the dev container): the `docker run` command in Context, then `curl -s localhost:8000/api/v1/run -H 'Content-Type: application/json' -d '{"code":"⎕←2+2","input":"","args":[]}'` returns stdout starting with `4`. Open `http://localhost:8000`, enter `⎕←2+2`, press Ctrl-Enter and see `4`. Open a tio.run `apl-dyalog` permalink with its host replaced by `localhost:8000`.
 
 ## Out of scope
 
@@ -306,7 +306,7 @@ The dev container has no access to any Docker daemon and cannot create user name
 - **Root with `CAP_SYS_ADMIN` in the container.** `runner-api` runs as root inside the container, and AppArmor and Docker's masked paths are off there. A flaw in `runner-api`'s request handling is therefore nearly as serious as a jail escape. Mitigations: a small Go codebase, strict request validation, no shell anywhere in the request path, Docker's capability limits, device filter and seccomp profile, and the dedicated VM.
 - **Kernel escape.** Every run shares the host kernel, and `⎕NA` exposes raw system calls. Mitigations: user namespace, no capabilities, seccomp policy, prompt kernel updates on the VM. gVisor is the next step if the threat model demands it.
 - **Seccomp policy.** A policy that is too strict breaks the interpreter; one that is too loose leaves attack surface. Item 2 shows the interpreter works under the policy, and item 4 shows blocked calls fail.
-- **cgroups inside the container.** nsjail's cgroup limits depend on the entry point enabling controllers in the container's cgroup namespace. A misconfigured host makes the limits in item 4 fail.
+- **cgroups inside the container.** nsjail's cgroup limits depend on the entry point enabling controllers in the container's cgroup namespace. The entry point refuses to start outside a private cgroup namespace on cgroup v2, where those changes would reach the host's cgroups.
 - **Interpreter output behaviour.** With Dyalog 20.0, `dyalogscript` echoes input read by `⍞` to stderr, so the Debug pane shows it. In one local test where stdout went to `/dev/null`, stderr also repeated the stdout content. Item 2 pins stderr's content on the current image.
 - **Slow feedback on container tests.** Every red or green check of a container test costs a CI run: building the image (including nsjail from source) and running the suites. Layer caching in `ci.yml` (GitHub Actions cache for the nsjail and Go build stages) keeps reruns short, and the unit tests with the fake executor cover the HTTP layer locally.
 - **Unreviewed upstream changes.** Tracking `latest` without review means a new release, including a new major version, goes live as soon as it passes the suites. The suites catch breakage in the sandbox contract and the `dyalogscript` behaviour above, but not subtle changes in APL semantics. Version tags allow rollback.

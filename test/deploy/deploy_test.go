@@ -129,9 +129,10 @@ func TestSandboxPortListensOnLoopbackOnly(t *testing.T) {
 // hostConfig is the part of a container's HostConfig that grants it
 // privileges.
 type hostConfig struct {
-	Privileged  bool
-	CapAdd      []string
-	SecurityOpt []string
+	Privileged   bool
+	CapAdd       []string
+	SecurityOpt  []string
+	CgroupnsMode string
 	// The Docker CLI and Compose record systempaths=unconfined as empty
 	// lists here, not among the security options.
 	MaskedPaths   *[]string
@@ -161,6 +162,12 @@ func TestSandboxContainerIsNotPrivilegedAndAddsOnlySysAdmin(t *testing.T) {
 	// Docker accepts a capability with or without its CAP_ prefix.
 	if len(hc.CapAdd) != 1 || strings.TrimPrefix(hc.CapAdd[0], "CAP_") != "SYS_ADMIN" {
 		t.Errorf("the sandbox container adds capabilities %q, want SYS_ADMIN alone", hc.CapAdd)
+	}
+}
+
+func TestSandboxContainerHasAPrivateCgroupNamespace(t *testing.T) {
+	if mode := sandboxHostConfig(t).CgroupnsMode; mode != "private" {
+		t.Errorf("the sandbox container's cgroup namespace mode is %q, want private", mode)
 	}
 }
 
