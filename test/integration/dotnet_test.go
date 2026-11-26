@@ -15,10 +15,11 @@ const dotNetCall = `⎕USING←'System'
 `
 
 // heapLimitCode prints the most memory the .NET garbage collector may use;
-// with a heap limit set, that is the limit.
+// with a heap limit set, that is the limit. GetGCMemoryInfo is called with
+// its argument: without one, the name is a function, and the dot that
+// follows it is an inner product.
 const heapLimitCode = `⎕USING←'System'
-GC.Collect
-⎕←GC.GetGCMemoryInfo.TotalAvailableMemoryBytes
+⎕←(GC.GetGCMemoryInfo GCKind.Any).TotalAvailableMemoryBytes
 `
 
 func TestARunCallsADotNetMethod(t *testing.T) {
