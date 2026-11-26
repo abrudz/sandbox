@@ -10,7 +10,7 @@ files in /usr/share/doc/<package>/copyright.
 
 The image also contains the following software, built from source.
 
-nsjail 3.6
+nsjail, revision ec259a3edb34c3b138fbad859c09e0e70259ff8b (after release 3.6)
   https://github.com/google/nsjail
   Copyright 2014 Google Inc. All Rights Reserved.
   Licensed under the Apache License, Version 2.0 (text below).
@@ -19,7 +19,7 @@ nsjail 3.6
   repository (out-of-memory kills take the whole jail; the CPU limit uses
   a 100 ms period). The changed lines are marked "Local change".
 
-Kafel, revision 76d0f41bf3eb5c4008713d64b9767b461a9129a3
+Kafel, revision df38168919485d6dbc51cf69f440f08ef72d7fc8
   https://github.com/google/kafel
   Copyright 2016 Google LLC
   Licensed under the Apache License, Version 2.0 (text below).

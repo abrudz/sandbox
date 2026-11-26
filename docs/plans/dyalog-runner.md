@@ -39,7 +39,7 @@ The public instance puts Caddy in front of the container for TLS.
 ### Container
 
 - `image/Containerfile` is a multi-stage build:
-  1. Build nsjail 3.6 from source; Debian does not package it.
+  1. Build nsjail from source, at a commit named by its hash; Debian does not package it. A weekly workflow (`.github/workflows/nsjail.yml`) keeps an issue open while nsjail's master has moved past the pinned commit, and the pin moves only after the changes are reviewed against `image/nsjail.cfg` and `image/nsjail.patch`.
   2. Build `runner-api` with Go 1.27.
   3. Final stage `FROM docker.io/dyalog/dyalog:latest`, adding nsjail's runtime libraries, nsjail, `runner-api`, `web/`, `image/run`, `image/nsjail.cfg`, the seccomp policy and `image/entrypoint`.
 - `image/entrypoint` replaces the base image's entry point, which prints a banner. It moves itself into a leaf cgroup, enables the `cpu`, `memory` and `pids` controllers for child cgroups, and then starts `runner-api`.

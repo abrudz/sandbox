@@ -1,9 +1,9 @@
 --- a/cgroup2.cc
 +++ b/cgroup2.cc
-@@ -222,6 +222,13 @@
- 	if (nsj->njc.cgroup_mem_max() > (size_t)0) {
- 		RETURN_ON_FAILURE(writeToCgroup(
- 		    cgroup_path, "memory.max", std::to_string(nsj->njc.cgroup_mem_max())));
+@@ -234,6 +234,13 @@
+ 	if (mem_max > (size_t)0) {
+ 		RETURN_ON_FAILURE(
+ 		    writeToCgroup(cgroup_path, "memory.max", std::to_string(mem_max)));
 +		/*
 +		 * Local change (github.com/abrudz/sandbox): an out-of-memory kill
 +		 * takes every process in the jail. Otherwise a second OOM event,
@@ -14,7 +14,7 @@
  	}
  
  	if (swap_max >= (ssize_t)0) {
-@@ -255,9 +262,13 @@
+@@ -267,9 +274,13 @@
  	 * The maximum bandwidth limit in the format: `$MAX $PERIOD`.
  	 * This indicates that the group may consume up to $MAX in each $PERIOD
  	 * duration.

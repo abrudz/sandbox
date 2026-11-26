@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# nsjail-upstream PINNED HEAD STATUS AHEAD RELEASE
+#
+# Says how nsjail's master stands against the commit image/Containerfile
+# pins, for the issue the nsjail upstream workflow keeps open. PINNED and
+# HEAD are the pinned commit and master's head; STATUS and AHEAD are
+# GitHub's comparison of PINNED with HEAD ("identical", "ahead", "behind" or
+# "diverged") and the number of commits HEAD has that PINNED lacks; RELEASE
+# is the latest release's tag. Exits 0 and prints the issue's body when
+# there is something to report, 1 when the pin is master's head, and 2 on
+# arguments it cannot read.
+set -euo pipefail
+
+if [ $# -ne 5 ]; then
+	echo "usage: $0 PINNED HEAD STATUS AHEAD RELEASE" >&2
+	exit 2
+fi
+pinned=$1 head=$2 status=$3 ahead=$4 release=$5
+hash='^[0-9a-f]{40}$'
+if ! [[ $pinned =~ $hash && $head =~ $hash ]]; then
+	echo "$0: PINNED and HEAD must be full commit hashes, not \"$pinned\" and \"$head\"" >&2
+	exit 2
+fi
+if ! [[ $ahead =~ ^[0-9]+$ ]]; then
+	echo "$0: AHEAD must be a count of commits, not \"$ahead\"" >&2
+	exit 2
+fi
+
+compare="https://github.com/google/nsjail/compare/$pinned...$head"
+case $status in
+identical)
+	echo "The pinned commit, $pinned, is master's head."
+	exit 1
+	;;
+ahead)
+	commits="$ahead commits"
+	if [ "$ahead" -eq 1 ]; then
+		commits="1 commit"
+	fi
+	cat <<EOF
+nsjail's master is $commits past the commit image/Containerfile pins, $pinned. The latest release is $release.
+
+Changes: $compare
+
+To take them, review the changes against image/nsjail.cfg and image/nsjail.patch, set NSJAIL_COMMIT to the reviewed commit, and update THIRD_PARTY_NOTICES. This issue closes once the pin is master's head.
+EOF
+	;;
+behind | diverged)
+	cat <<EOF
+nsjail's master no longer contains the commit image/Containerfile pins, $pinned: GitHub reports master as $status. Master's history may have been rewritten. Find out why before moving the pin; the image still builds the pinned commit while GitHub serves it.
+
+Comparison: $compare
+EOF
+	;;
+*)
+	echo "$0: unknown comparison status \"$status\"" >&2
+	exit 2
+	;;
+esac

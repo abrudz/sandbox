@@ -5,21 +5,29 @@
 # the Debian packages that provide nsjail's shared libraries; the final
 # stage installs them and fails the build if any library is still missing.
 ARG DEBIAN_RELEASE=trixie
-ARG NSJAIL_VERSION=3.6
+# nsjail is the security boundary, so it is pinned to a commit, not a tag a
+# release could move. The pin moves only after the changes up to the new
+# commit are reviewed against image/nsjail.cfg and image/nsjail.patch;
+# .github/workflows/nsjail.yml reports when master moves past it. This is a
+# master commit after release 3.6, which has fixes the release lacks.
+ARG NSJAIL_COMMIT=ec259a3edb34c3b138fbad859c09e0e70259ff8b
 # scripts/build-image pins the upstream image by digest; a plain build
 # takes the tag as it is.
 ARG DYALOG_IMAGE=docker.io/dyalog/dyalog:latest
 
 FROM docker.io/library/debian:${DEBIAN_RELEASE}-slim AS nsjail
-ARG NSJAIL_VERSION
+ARG NSJAIL_COMMIT
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       autoconf bison ca-certificates flex g++ gcc git libnl-route-3-dev \
       libprotobuf-dev libtool make pkg-config protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
-RUN git clone --branch "${NSJAIL_VERSION}" --depth 1 \
-      --recurse-submodules --shallow-submodules \
-      https://github.com/google/nsjail.git /src/nsjail
+# Only the pinned commit is fetched; the submodules are those it names.
+RUN git init --quiet /src/nsjail \
+ && git -C /src/nsjail fetch --quiet --depth 1 https://github.com/google/nsjail.git "${NSJAIL_COMMIT}" \
+ && git -C /src/nsjail checkout --quiet FETCH_HEAD \
+ && test "$(git -C /src/nsjail rev-parse HEAD)" = "${NSJAIL_COMMIT}" \
+ && git -C /src/nsjail submodule update --quiet --init --recursive --depth 1
 WORKDIR /src/nsjail
 # Local changes to cgroup2.cc: an out-of-memory kill takes the whole jail,
 # and the CPU limit uses a 100 ms period; see the patch for why.

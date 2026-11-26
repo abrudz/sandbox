@@ -115,6 +115,7 @@ The plan in [docs/plans/](docs/plans/) describes the architecture and the work. 
 - Linters: `gofmt`, `go vet` and `staticcheck` for Go, `shellcheck` for the scripts.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs these on every push. It also builds the image, runs the integration suite (`test/integration`) and the browser suite (`test/ui`) against it, and provisions a runner with `deploy/setup-host` to run the deployment suite (`test/deploy`).
 - [`.github/workflows/publish.yml`](.github/workflows/publish.yml) publishes the image. Only its last job can push packages, and it runs nothing from the repository: it pushes the image the build job saved once the suites have passed. `go test ./test/workflows/` checks this, and that every action is pinned to a commit.
+- The image builds nsjail from a commit named by its hash, which moves only by a reviewed change. [`.github/workflows/nsjail.yml`](.github/workflows/nsjail.yml) compares it with nsjail's master every week and keeps an issue open, titled "Review nsjail's changes past the pinned commit", while master has moved past it. Caddy is not pinned: it faces the internet, and the daily update keeps it patched.
 
 ## Licence
 

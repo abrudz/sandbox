@@ -1,0 +1,82 @@
+name: nsjail upstream
+
+# Compares the nsjail commit image/Containerfile pins with nsjail's master,
+# weekly. While master has moved past the pin, one open issue says how far,
+# with a link to the changes, or says that master no longer contains the
+# pinned commit; once the pin is master's head, the issue is closed. The pin
+# moves only by a reviewed change. A push that changes the pin or the check
+# runs the comparison and writes no issue.
+on:
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/nsjail.yml
+      - image/Containerfile
+      - scripts/nsjail-upstream
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsjail-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Compare the pinned commit with master
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TITLE: Review nsjail's changes past the pinned commit
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare
+        id: compare
+        run: |
+          pinned=$(sed -nE 's/^ARG NSJAIL_COMMIT=([0-9a-f]{40})$/\1/p' image/Containerfile)
+          if [ -z "$pinned" ]; then
+            echo "::error::image/Containerfile pins no nsjail commit."
+            exit 1
+          fi
+          head=$(gh api repos/google/nsjail/commits/master --jq .sha)
+          read -r status ahead < <(gh api "repos/google/nsjail/compare/$pinned...$head?per_page=1" --jq '"\(.status) \(.ahead_by)"')
+          release=$(gh api repos/google/nsjail/releases/latest --jq .tag_name)
+          result=0
+          scripts/nsjail-upstream "$pinned" "$head" "$status" "$ahead" "$release" > report.md || result=$?
+          cat report.md
+          case $result in
+          0) echo "report=true" >> "$GITHUB_OUTPUT" ;;
+          1) echo "report=false" >> "$GITHUB_OUTPUT" ;;
+          *) exit "$result" ;;
+          esac
+
+      - name: Open, update or close the issue
+        if: github.event_name != 'push'
+        env:
+          REPORT: ${{ steps.compare.outputs.report }}
+        run: |
+          number=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" \
+            --jq '[.[] | select(.title == env.TITLE)][0].number // empty')
+          if [ "$REPORT" = true ]; then
+            if [ -n "$number" ]; then
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/$number" -F body=@report.md > /dev/null
+              echo "::notice::Updated issue #$number."
+            else
+              number=$(gh api "repos/$GITHUB_REPOSITORY/issues" -f title="$TITLE" -F body=@report.md --jq .number)
+              echo "::notice::Opened issue #$number."
+            fi
+          elif [ -n "$number" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number/comments" -F body=@report.md > /dev/null
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/$number" -f state=closed -f state_reason=completed > /dev/null
+            echo "::notice::Closed issue #$number."
+          else
+            echo "::notice::The pin is master's head, and no issue is open."
+          fi
