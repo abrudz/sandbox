@@ -5,6 +5,7 @@ package integration
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,12 +54,26 @@ func TestImageShipsThirdPartyNotices(t *testing.T) {
 	}
 }
 
+// jailConfig is the smallest nsjail configuration that jails a process as
+// runs are jailed: as uid and gid 99999, inside the jail and outside it.
+// nsjail's --uid_mapping and --gid_mapping options need newuidmap, which
+// the image does not have, and --user alone maps the jailed uid onto root
+// outside, which needs CAP_SETFCAP.
+const jailConfig = `mode: ONCE
+uidmap { inside_id: "99999" outside_id: "99999" }
+gidmap { inside_id: "99999" outside_id: "99999" }
+`
+
 func TestImageRunsAJailedProcess(t *testing.T) {
 	image := env(t, "SANDBOX_IMAGE")
+	config := filepath.Join(t.TempDir(), "jail.cfg")
+	if err := os.WriteFile(config, []byte(jailConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	args := append([]string{"run", "--rm"}, runFlags(t)...)
+	args := append([]string{"run", "--rm", "-v", config + ":/tmp/jail.cfg:ro"}, runFlags(t)...)
 	args = append(args, "--entrypoint", "nsjail", image,
-		"--mode", "o", "--chroot", "/", "--user", "99999", "--group", "99999", "--quiet",
+		"--config", "/tmp/jail.cfg", "--chroot", "/", "--quiet",
 		"--", "/bin/echo", "jailed")
 	out, err := docker(t, args...)
 	if err != nil {
