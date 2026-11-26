@@ -271,6 +271,140 @@ func TestUnixAndIPSocketsOpen(t *testing.T) {
 	}
 }
 
+func TestIPSocketsWithAProtocolOtherThanTCPOrUDPFailWithEPERM(t *testing.T) {
+	// In IPv4 and IPv6 only the default, TCP and UDP protocols are allowed.
+	// The kernel loads the module for a protocol it lacks, such as SCTP,
+	// DCCP or L2TP, before it checks any capability, and these need none,
+	// so a run could bring their code into the host's kernel. MPTCP is
+	// built in, and stands for any other protocol. The kernel would
+	// otherwise open these sockets or answer EPROTONOSUPPORT or
+	// ESOCKTNOSUPPORT, never EPERM.
+	for _, c := range []struct {
+		name                   string
+		family, kind, protocol int64
+	}{
+		{"SCTP", 2, 1, 132},     // SOCK_STREAM, IPPROTO_SCTP
+		{"DCCP", 2, 6, 33},      // SOCK_DCCP, IPPROTO_DCCP
+		{"UDP-Lite", 2, 2, 136}, // SOCK_DGRAM, IPPROTO_UDPLITE
+		{"L2TP", 2, 2, 115},     // IPPROTO_L2TP
+		{"MPTCP", 2, 1, 262},    // IPPROTO_MPTCP
+		{"SCTP over IPv6", 10, 1, 132},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assertRunLines(t, systemCall(t, 41, c.family, c.kind, c.protocol), "¯1 1")
+		})
+	}
+}
+
+func TestTCPAndUDPSocketsOpenWithTheProtocolNamedOrLeftToTheDefault(t *testing.T) {
+	for _, c := range []struct {
+		name                   string
+		family, kind, protocol int64
+	}{
+		{"TCP over IPv4", 2, 1, 6},
+		{"UDP over IPv4", 2, 2, 17},
+		{"UDP over IPv4 by default", 2, 2, 0},
+		{"TCP over IPv6", 10, 1, 6},
+		{"UDP over IPv6", 10, 2, 17},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := systemCall(t, 41, c.family, c.kind, c.protocol)
+			if got := lines(r.Stdout); len(got) != 1 || strings.HasPrefix(got[0], "¯") {
+				t.Errorf("output lines %q, want a descriptor and errno; %s", got, describe(r))
+			}
+		})
+	}
+}
+
+// withErrno runs code that sets result by calling the C library through
+// ⎕NA, and returns the run with one output line: result and errno.
+func withErrno(t *testing.T, code string) runResponse {
+	t.Helper()
+	return run(t, `⎕NA'P libc.so.6|__errno_location'
+⎕NA'libc.so.6|memcpy >I4[1] P P'
+`+code+`errno←⊃memcpy 1 __errno_location 4
+⎕←result errno
+`, "")
+}
+
+// socketPair calls socketpair from a run, with room for the two
+// descriptors, and returns the run with one output line: the result and
+// errno.
+func socketPair(t *testing.T, family, kind, protocol int64) runResponse {
+	t.Helper()
+	return withErrno(t, fmt.Sprintf(`⎕NA'I4 libc.so.6|socketpair I4 I4 I4 >I4[2]'
+result←⊃socketpair %d %d %d 2
+`, family, kind, protocol))
+}
+
+func TestSocketPairsOtherThanUnixOnesFailWithEPERM(t *testing.T) {
+	// socketpair creates its sockets as socket does, so the kernel loads a
+	// missing family's or protocol's module before it refuses a family
+	// without socket pairs. Docker's seccomp profile allows socketpair in
+	// Unix and TIPC only, and refuses the IP cases here with EPERM too; the
+	// jail's policy refuses every family but Unix, so that it does not
+	// depend on the container's profile. For TIPC the kernel would
+	// otherwise succeed or answer EAFNOSUPPORT, never EPERM.
+	for _, c := range []struct {
+		name                   string
+		family, kind, protocol int64
+	}{
+		{"AF_INET", 2, 1, 0},
+		{"AF_INET with SCTP", 2, 1, 132},
+		{"AF_INET6", 10, 2, 0},
+		{"AF_TIPC", 30, 5, 0}, // SOCK_SEQPACKET
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assertRunLines(t, socketPair(t, c.family, c.kind, c.protocol), "¯1 1")
+		})
+	}
+}
+
+func TestUnixSocketPairsOpen(t *testing.T) {
+	r := socketPair(t, 1, 1, 0)
+
+	if got := lines(r.Stdout); len(got) != 1 || !strings.HasPrefix(got[0], "0 ") {
+		t.Errorf("output lines %q, want result 0 and errno; %s", got, describe(r))
+	}
+}
+
+func TestSocketIoctlsThatLoadAModuleFailWithEPERM(t *testing.T) {
+	// On any socket, and before any capability check, SIOCGIFVLAN makes the
+	// kernel load 8021q and SIOCGIFBR loads bridge. With no argument the
+	// kernel would otherwise answer EFAULT, or ENOPKG without the module,
+	// never EPERM.
+	for _, c := range []struct {
+		name    string
+		request int64
+	}{
+		{"SIOCGIFVLAN", 0x8982},
+		{"SIOCGIFBR", 0x8940},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := withErrno(t, fmt.Sprintf(`⎕NA'I4 libc.so.6|socket I4 I4 I4'
+⎕NA'I4 libc.so.6|ioctl I4 U8 P'
+result←ioctl (socket 2 2 0) %d 0
+`, c.request))
+
+			assertRunLines(t, r, "¯1 1")
+		})
+	}
+}
+
+func TestSettingATCPUpperLayerProtocolFailsWithEPERM(t *testing.T) {
+	// TCP_ULP (level SOL_TCP, option 31) attaches an upper-layer protocol
+	// such as kernel TLS to a socket. The kernel loads its module only for
+	// a caller with CAP_NET_ADMIN, but a run could still use one the host
+	// has loaded. The kernel would otherwise answer ENOENT, or ENOTCONN on
+	// a socket that is not connected, never EPERM.
+	r := withErrno(t, `⎕NA'I4 libc.so.6|socket I4 I4 I4'
+⎕NA'I4 libc.so.6|setsockopt I4 I4 I4 <U1[] I4'
+result←setsockopt (socket 2 1 0) 6 31 (⎕UCS'tls') 3
+`)
+
+	assertRunLines(t, r, "¯1 1")
+}
+
 func TestRunIsUnprivilegedAndSeesOnlyItsOwnProcesses(t *testing.T) {
 	r := run(t, `{⎕←⍵}¨⎕SH'id -u; grep CapEff /proc/self/status; cat /proc/[0-9]*/comm'`+"\n", "")
 
