@@ -159,6 +159,18 @@ func TestWorkspaceIsHalfTheMemoryLimit(t *testing.T) {
 	}
 }
 
+func TestDotNetHeapIsAQuarterOfTheMemoryLimit(t *testing.T) {
+	for memory, want := range map[string]int64{"": 128 << 20, "256M": 64 << 20} {
+		got, err := config.FromEnv(environment(map[string]string{"SANDBOX_MEMORY": memory}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if heap := got.DotNetHeap(); heap != want {
+			t.Errorf("SANDBOX_MEMORY=%q: .NET heap %d, want %d", memory, heap, want)
+		}
+	}
+}
+
 func TestSandboxTimeoutSetsTheWallClockLimit(t *testing.T) {
 	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_TIMEOUT": "2s"}))
 	if err != nil {

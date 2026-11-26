@@ -71,6 +71,7 @@ func main() {
 		CPUs:        limits.CPUs,
 		Pids:        limits.Pids,
 		Workspace:   limits.Workspace(),
+		DotNetHeap:  limits.DotNetHeap(),
 		Logf:        log.Printf,
 	}
 	handler := api.NewHandler(api.Options{
@@ -97,10 +98,10 @@ func main() {
 	served := make(chan error, 1)
 	go func() { served <- srv.ListenAndServe() }()
 	log.Printf("runner-api listening on %s (Dyalog %s from %s, commit %s; per run: timeout %v, output %d bytes per stream, "+
-		"memory %d bytes, workspace %d bytes, %g CPUs, %d processes; requests: %d bytes, "+
+		"memory %d bytes, workspace %d bytes, .NET heap %d bytes, %g CPUs, %d processes; requests: %d bytes, "+
 		"%d runs at once, %d per client, %d per client per minute; trusted proxies %v)",
 		srv.Addr, version, imageDigest, commit, limits.Timeout, limits.OutputLimit,
-		limits.Memory, limits.Workspace(), limits.CPUs, limits.Pids, limits.RequestLimit,
+		limits.Memory, limits.Workspace(), limits.DotNetHeap(), limits.CPUs, limits.Pids, limits.RequestLimit,
 		limits.Concurrency, limits.ClientConcurrency, limits.ClientRate, limits.TrustedProxies)
 
 	select {

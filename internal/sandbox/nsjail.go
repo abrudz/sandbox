@@ -33,6 +33,8 @@ type Nsjail struct {
 	Pids int
 	// Workspace is the interpreter's MAXWS in bytes.
 	Workspace int64
+	// DotNetHeap is the .NET garbage collector's heap limit in bytes.
+	DotNetHeap int64
 	// Logf receives nsjail's log when nsjail cannot run a job.
 	Logf func(format string, args ...any)
 }
@@ -91,6 +93,8 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 		"--cgroup_cpu_ms_per_sec", strconv.Itoa(max(1, int(math.Round(n.CPUs*1000)))),
 		// Dyalog reads a size without a unit as KiB; the unit is explicit.
 		"--env", fmt.Sprintf("MAXWS=%dK", n.Workspace/1024),
+		// The runtime reads its numeric settings as hexadecimal.
+		"--env", fmt.Sprintf("DOTNET_GCHeapHardLimit=0x%x", n.DotNetHeap),
 		"--", n.Command,
 	}
 	cmd := exec.CommandContext(runCtx, n.Binary, append(args, job.Args...)...)

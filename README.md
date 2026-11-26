@@ -46,7 +46,7 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 |---|---|---|
 | `SANDBOX_TIMEOUT` | `10s` | Wall-clock limit of one run |
 | `SANDBOX_OUTPUT_LIMIT` | `131072` | Bytes kept of each of stdout and stderr |
-| `SANDBOX_MEMORY` | `512M` | Memory limit of one run; the workspace (`MAXWS`) is half of it |
+| `SANDBOX_MEMORY` | `512M` | Memory limit of one run; the workspace (`MAXWS`) is half of it, and the .NET heap a quarter |
 | `SANDBOX_CPUS` | `1` | CPUs one run may use, such as `0.5` |
 | `SANDBOX_PIDS` | `64` | Processes one run may have |
 | `SANDBOX_REQUEST_LIMIT` | `65536` | Bytes of code plus input in one request |
@@ -61,6 +61,7 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 - `POST /api/v1/run` with `{"code": "⎕←2+2", "input": "", "args": []}` runs the program and answers with its `stdout`, `stderr`, `exitCode`, `signal`, `timedOut`, whether each output was truncated, its wall, user and system time, and `dyalogVersion`.
   An argument `NAME=value` sets the interpreter's configuration parameter `NAME`, as on TIO; the other arguments go to the program.
   The request must have `Content-Type: application/json`. The per-client limits treat each IPv4 address, and each IPv6 /64, as one client.
+  A run can use .NET classes through `⎕USING`, with the .NET runtime that Dyalog's image installs. A .NET allocation past the heap limit, a quarter of the run's memory limit, throws `OutOfMemoryException`, which the program can trap as `EXCEPTION`.
 - `GET /api/v1/version` answers with `dyalogVersion`, `imageDigest` (the digest of the `dyalog/dyalog` image the image was built from), `commit`, and `timeoutMs`, the wall-clock limit of one run.
 - `GET /healthz` answers 200 while the service is serving.
 
