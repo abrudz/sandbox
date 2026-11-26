@@ -10,25 +10,27 @@ You need Docker with cgroup v2: Docker Desktop on Windows (with WSL 2) or macOS,
 
 ```
 curl -LO https://raw.githubusercontent.com/abrudz/sandbox/main/deploy/seccomp.json
-docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-  --security-opt systempaths=unconfined --security-opt seccomp=seccomp.json \
-  --cgroupns private -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+docker run --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
+  --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+  --security-opt seccomp=seccomp.json --cgroupns private \
+  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 Then open http://localhost:8000, type a program such as `⎕←2+2`, and press Ctrl-Enter to run it. Permalinks have TIO's format, so a tio.run link for APL (Dyalog Unicode) opens here with `https://tio.run/` replaced by `http://localhost:8000/`.
 
 The `127.0.0.1:` in `-p` publishes the port on this machine's loopback address only, so other machines cannot reach the service. Ctrl-C stops it once its runs in progress have finished.
 
-nsjail builds a jail for every run, and each flag gives it something Docker otherwise withholds:
+nsjail builds a jail for every run. `--cap-drop ALL` drops every capability, and each of the other flags gives nsjail something it needs:
 
 - `--cap-add SYS_ADMIN`: creating namespaces, mounts and cgroups.
+- `--cap-add SETUID` and `--cap-add SETGID`: mapping the jail's user and group, which are not root's, into the jail's user namespace.
 - `apparmor=unconfined`: Docker's AppArmor profile denies `mount`.
 - `systempaths=unconfined`: the kernel refuses a new `/proc` while parts of the container's are masked.
 - `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`. It also refuses i386 and x32 system calls on x86_64, which Docker's default allows.
 
 `--cgroupns private`, Docker's default on cgroup v2, gives the container a cgroup namespace of its own. The entry point changes the cgroup at the root of that namespace, so it refuses to start in the host's.
 
-The container keeps Docker's other capability limits, its device filter and its seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the first four flags also works, but gives the container every capability and the host's devices.
+The container holds no other capability, and keeps Docker's device filter and seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the capability and security options also works, but gives the container every capability and the host's devices.
 
 To update, `docker pull ghcr.io/abrudz/sandbox`. Each image is also tagged with its Dyalog version, such as `ghcr.io/abrudz/sandbox:21.0.55109.0`.
 
