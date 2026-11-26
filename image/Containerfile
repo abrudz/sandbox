@@ -5,21 +5,24 @@
 # the Debian packages that provide nsjail's shared libraries; the final
 # stage installs them and fails the build if any library is still missing.
 ARG DEBIAN_RELEASE=trixie
+# nsjail is the security boundary, so it is pinned to a commit, not a tag a
+# release could move. NSJAIL_COMMIT is the 3.6 tag.
 ARG NSJAIL_VERSION=3.6
+ARG NSJAIL_COMMIT=f78475530b46d0186111a9096b30725f816b55fe
 # scripts/build-image pins the upstream image by digest; a plain build
 # takes the tag as it is.
 ARG DYALOG_IMAGE=docker.io/dyalog/dyalog:latest
 
 FROM docker.io/library/debian:${DEBIAN_RELEASE}-slim AS nsjail
-ARG NSJAIL_VERSION
+ARG NSJAIL_COMMIT
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       autoconf bison ca-certificates flex g++ gcc git libnl-route-3-dev \
       libprotobuf-dev libtool make pkg-config protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
-RUN git clone --branch "${NSJAIL_VERSION}" --depth 1 \
-      --recurse-submodules --shallow-submodules \
-      https://github.com/google/nsjail.git /src/nsjail
+RUN git clone https://github.com/google/nsjail.git /src/nsjail \
+ && git -C /src/nsjail checkout --quiet "${NSJAIL_COMMIT}" \
+ && git -C /src/nsjail submodule update --init --recursive --depth 1
 WORKDIR /src/nsjail
 # Local changes to cgroup2.cc: an out-of-memory kill takes the whole jail,
 # and the CPU limit uses a 100 ms period; see the patch for why.
