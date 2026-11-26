@@ -69,6 +69,7 @@ The public instance puts Caddy in front of the container for TLS.
 - An argument `NAME=value` sets the configuration parameter `NAME`, as on TIO, which passes the arguments to the interpreter's command line. `2⎕NQ#'GetEnvironment' 'NAME'` returns it, and parameters read at startup, such as `DEFAULT_IO`, take effect. Dyalog 20.0 does not keep non-ASCII characters in a parameter given on the command line.
 - Output lines end with CR.
 - `MAXWS` is set below the memory limit, so APL reports `WS FULL` before the cgroup limit is reached. A `MAXWS` argument replaces it, because the interpreter takes the first value of a parameter given twice and the run's parameters come first.
+- .NET classes are available through `⎕USING`. The jail mounts the runtime that Dyalog's image installs in `/opt/dotnet` read-only and sets `DOTNET_ROOT`, through which the interpreter finds it. The runtime cannot see the run's cgroup, so `DOTNET_GCHeapHardLimit` limits its heap to a quarter of the memory limit: a .NET allocation past it throws `OutOfMemoryException`, which the program can trap as `EXCEPTION`, before the cgroup limit is reached. `DOTNET_EnableDiagnostics=0` keeps the runtime from creating a diagnostics socket and debugger pipes and from accepting a debugger or profiler.
 
 Programs that rely on TIO's own wrapper (code fixed as a namespace script, unread input lines executed as statements) can behave differently here.
 
@@ -80,7 +81,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
 | CPU | cgroup `cpu.max` | 1 CPU |
 | Wall-clock time | nsjail time limit, plus a kill from the executor when its context is cancelled | 10 s |
-| Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` below the limit | 512 MiB; `MAXWS=256M` |
+| Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` and the .NET heap limit below the limit | 512 MiB; `MAXWS=256M`; .NET heap 128 MiB |
 | Disk | tmpfs `size=` per writable mount, counted against the memory limit | 16 MiB each |
 | Processes and threads | cgroup `pids.max` | 64 |
 | Privileges | unprivileged uid and gid in a new user namespace, no capabilities, nsjail's seccomp-bpf denylist (namespace creation, `mount`, `ptrace`, `bpf`, `keyctl`, `perf_event_open`, `fanotify_init`, sockets other than Unix and IP, and similar) inside the container's seccomp profile, Docker's default allowlist without i386 or x32 calls, rlimits for core files and open files | always on |
@@ -208,6 +209,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 - stderr never repeats what was written to stdout.
 - The response reports wall, user and system time.
 - `/api/v1/version` reports the same Dyalog version that `'.'⎕WG'APLVersion'` reports inside a run.
+- A run calls a .NET method through `⎕USING` and finishes in under 3 s; a .NET allocation past the heap limit, a quarter of the memory limit, throws an exception the run can trap; the runtime creates no diagnostics socket.
 
 **3. Limits and cleanup**
 - A program that runs past the wall-clock limit is killed, and the response reports `timedOut`.

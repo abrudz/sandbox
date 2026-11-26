@@ -57,6 +57,15 @@ func (l Limits) Workspace() int64 {
 	return l.Memory / 2
 }
 
+// DotNetHeap is the .NET garbage collector's heap limit in bytes: a quarter
+// of the memory limit, beside the workspace's half, so that a .NET
+// allocation past it throws OutOfMemoryException before the cgroup's limit
+// is reached. The runtime cannot see the run's cgroup, and without a limit
+// sizes its heap from the host's memory.
+func (l Limits) DotNetHeap() int64 {
+	return l.Memory / 4
+}
+
 // The plan's defaults (Sandbox limits table); the default concurrency is
 // the number of CPUs.
 const (

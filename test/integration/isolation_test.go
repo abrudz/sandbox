@@ -80,9 +80,9 @@ func TestRunCannotOpenAnOutboundTCPConnection(t *testing.T) {
 }
 
 func TestRunCannotWriteOutsideTmpAndHome(t *testing.T) {
-	r := run(t, "{⎕←⍵}¨{0::'failed' ⋄ _←(⊂'a')⎕NPUT ⍵ ⋄ 'written'}¨'/marker' '/usr/marker' '/etc/marker' '/opt/mdyalog/marker' '/job/marker'\n", "")
+	r := run(t, "{⎕←⍵}¨{0::'failed' ⋄ _←(⊂'a')⎕NPUT ⍵ ⋄ 'written'}¨'/marker' '/usr/marker' '/etc/marker' '/opt/mdyalog/marker' '/opt/dotnet/marker' '/job/marker'\n", "")
 
-	assertRunLines(t, r, "failed", "failed", "failed", "failed", "failed")
+	assertRunLines(t, r, "failed", "failed", "failed", "failed", "failed", "failed")
 }
 
 func TestRunCannotWriteMoreThanTheTmpfsLimitToTmpOrHome(t *testing.T) {
