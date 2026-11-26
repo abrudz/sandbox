@@ -340,8 +340,11 @@ result←⊃socketpair %d %d %d 2
 func TestSocketPairsOtherThanUnixOnesFailWithEPERM(t *testing.T) {
 	// socketpair creates its sockets as socket does, so the kernel loads a
 	// missing family's or protocol's module before it refuses a family
-	// without socket pairs. The kernel would otherwise answer EOPNOTSUPP,
-	// EAFNOSUPPORT or EPROTONOSUPPORT, or succeed, never EPERM.
+	// without socket pairs. Docker's seccomp profile allows socketpair in
+	// Unix and TIPC only, and refuses the IP cases here with EPERM too; the
+	// jail's policy refuses every family but Unix, so that it does not
+	// depend on the container's profile. For TIPC the kernel would
+	// otherwise succeed or answer EAFNOSUPPORT, never EPERM.
 	for _, c := range []struct {
 		name                   string
 		family, kind, protocol int64

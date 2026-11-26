@@ -465,7 +465,19 @@ func modprobePlan(module string) (string, error) {
 }
 
 func TestModprobeRefusesTheSocketModulesTheHostDoesNotUse(t *testing.T) {
+	config := "\n" + command(t, "modprobe", "--showconfig") + "\n"
 	for _, m := range unusedSocketModules {
+		if !strings.Contains(config, "\ninstall "+m+" /bin/false\n") {
+			t.Errorf("modprobe's configuration does not refuse %s", m)
+			continue
+		}
+		// modprobe plans nothing for a module the kernel already has, built
+		// in or loaded; for those only the jail's seccomp policy stands
+		// between a run and the module's code.
+		if _, err := os.Stat("/sys/module/" + m); err == nil {
+			t.Logf("%s is already in the kernel", m)
+			continue
+		}
 		if plan, _ := modprobePlan(m); !strings.Contains(plan, "install /bin/false") {
 			t.Errorf("modprobe would load %s: %q", m, plan)
 		}
