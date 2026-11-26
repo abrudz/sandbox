@@ -55,6 +55,7 @@ Environment variables, given to `docker run` with `-e NAME=value`, set the limit
 | `SANDBOX_CLIENT_RATE` | `30` | Runs one client may start per minute |
 | `SANDBOX_READ_CONCURRENCY` | `64` | Run requests whose bodies are read at once, across all clients |
 | `SANDBOX_TRUSTED_PROXIES` | none | Comma-separated addresses or networks whose `X-Forwarded-For` header names the client |
+| `SANDBOX_SOCKET` | none | Absolute path of a Unix socket to listen on, open to root only, instead of TCP port 8080; a request on it names the client in `X-Forwarded-For` |
 
 ### API
 
@@ -69,7 +70,7 @@ The plan, [docs/plans/dyalog-runner.md](docs/plans/dyalog-runner.md), describes 
 
 ## The public instance
 
-The public instance runs on a dedicated Ubuntu 24.04 VM whose only secret is Caddy's TLS key. Caddy serves the site over TLS and passes requests to the sandbox container, which listens on the VM's loopback address only and runs with the four options described under Running it locally. Caddy refuses a request body larger than runner-api accepts. The container's memory limit is the VM's memory less 512 MiB, with no swap; it runs one run per CPU, or fewer so that every run fits within that limit, and has a process limit to match. Before provisioning, point the domain's DNS records (A, and AAAA for IPv6) at the VM. Then, on the VM:
+The public instance runs on a dedicated Ubuntu 24.04 VM whose only secret is Caddy's TLS key. Caddy serves the site over TLS and passes requests to the sandbox container through a Unix socket in a volume the two share. The sandbox container has no network but loopback, so it can reach neither the internet nor the VM, and it runs with the four options described under Running it locally. Caddy refuses a request body larger than runner-api accepts. The container's memory limit is the VM's memory less 512 MiB, with no swap; it runs one run per CPU, or fewer so that every run fits within that limit, and has a process limit to match. Before provisioning, point the domain's DNS records (A, and AAAA for IPv6) at the VM. Then, on the VM:
 
 ```
 git clone https://github.com/abrudz/sandbox

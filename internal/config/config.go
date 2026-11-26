@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -124,6 +125,13 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 			return Limits{}, fmt.Errorf("SANDBOX_TRUSTED_PROXIES=%q: %v", s, err)
 		}
 		limits.TrustedProxies = proxies
+	}
+
+	if v := getenv("SANDBOX_SOCKET"); v != "" {
+		if !filepath.IsAbs(v) {
+			return Limits{}, fmt.Errorf("SANDBOX_SOCKET=%q: want an absolute path", v)
+		}
+		limits.Socket = v
 	}
 
 	if v := getenv("SANDBOX_TIMEOUT"); v != "" {

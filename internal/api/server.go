@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"mime"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
@@ -88,9 +90,30 @@ func NewHandler(opts Options) *Server {
 	return s
 }
 
-// Listen returns the listener runner-api serves on: TCP port 8080.
+// Listen returns the listener runner-api serves on: the Unix socket at
+// socket, or TCP port 8080 when socket is empty. The socket is open to its
+// owner only, so a request on it comes from a process as privileged as
+// runner-api, and its X-Forwarded-For header names the client. A socket
+// that a process left behind without closing its listener is replaced;
+// closing the listener removes the socket.
 func Listen(socket string) (net.Listener, error) {
-	return net.Listen("tcp", ":8080")
+	if socket == "" {
+		return net.Listen("tcp", ":8080")
+	}
+	if info, err := os.Lstat(socket); err == nil && info.Mode().Type() == fs.ModeSocket {
+		if err := os.Remove(socket); err != nil {
+			return nil, err
+		}
+	}
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }
 
 // HTTPServer returns an http.Server that serves s on addr with the read and

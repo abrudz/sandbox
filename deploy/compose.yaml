@@ -30,16 +30,16 @@ services:
     # Longer than a run's time limit plus the time it takes to stop, so that
     # replacing the container lets its runs in progress finish.
     stop_grace_period: 30s
+    # No network but loopback: nothing in the container connects out, and
+    # runs have network namespaces of their own. runner-api serves Caddy on
+    # a Unix socket in the volume the two share, open to root only, so its
+    # X-Forwarded-For header names the client.
+    network_mode: none
     environment:
-      # Caddy reaches the sandbox through the published loopback port, so
-      # its connections arrive from this network's gateway.
-      SANDBOX_TRUSTED_PROXIES: 172.31.254.1
+      SANDBOX_SOCKET: /run/sandbox/runner-api.sock
       SANDBOX_CONCURRENCY: ${SANDBOX_CONCURRENCY}
-    ports:
-      # Loopback only: Docker's published ports bypass the firewall.
-      - "127.0.0.1:8080:8080"
-    networks:
-      - sandbox
+    volumes:
+      - runner-api-socket:/run/sandbox
     logging:
       driver: local
 
@@ -55,16 +55,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+      - runner-api-socket:/run/sandbox
     logging:
       driver: local
-
-networks:
-  sandbox:
-    ipam:
-      config:
-        - subnet: 172.31.254.0/24
-          gateway: 172.31.254.1
 
 volumes:
   caddy-data:
   caddy-config:
+  runner-api-socket:
