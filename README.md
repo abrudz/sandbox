@@ -30,7 +30,7 @@ nsjail builds a jail for every run. `--cap-drop ALL` drops every capability, and
 
 `--cgroupns private`, Docker's default on cgroup v2, gives the container a cgroup namespace of its own. The entry point changes the cgroup at the root of that namespace, so it refuses to start in the host's.
 
-The container holds no other capability, and keeps Docker's device filter and seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. `--privileged` in place of the capability and security options also works, but gives the container every capability and the host's devices.
+The container holds no other capability, and keeps Docker's device filter and seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. Do not use `--privileged` in place of these options: besides every capability and the host's devices, it gives the container no seccomp profile, and the jail's own filter does not check x32 system calls, which the profile refuses.
 
 To update, `docker pull ghcr.io/abrudz/sandbox`. Each image is also tagged with its Dyalog version, such as `ghcr.io/abrudz/sandbox:21.0.55109.0`.
 
@@ -83,6 +83,7 @@ sudo deploy/setup-host
 `deploy/setup-host` does the following:
 - installs Docker Engine and compose, `ufw` and unattended upgrades;
 - masks apport and sets the kernel's core pattern to a file name, so that no crash, which a run can cause at will, starts a helper on the VM;
+- has modprobe refuse the socket protocol and family modules the VM does not use, such as SCTP, DCCP and TIPC, which the kernel would otherwise load whenever a process asks for one;
 - allows SSH, HTTP and HTTPS through the firewall and nothing else;
 - installs the instance in `/opt/sandbox`, with the seccomp profile and limits sized to the VM, and the daily update as `sandbox-update.service` and `sandbox-update.timer`;
 - starts the instance.
