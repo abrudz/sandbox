@@ -7,9 +7,10 @@ A small public service is needed that runs short Dyalog APL programs submitted b
 The deliverable is one container image that runs the whole service:
 
 ```
-docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-  --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
-  --cgroupns private -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+docker run --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
+  --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+  --security-opt seccomp=deploy/seccomp.json --cgroupns private \
+  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 The backend is new; the frontend is taken from TIO, which is MIT-licensed:
@@ -43,7 +44,7 @@ The public instance puts Caddy in front of the container for TLS.
   3. Final stage `FROM docker.io/dyalog/dyalog:latest`, adding nsjail's runtime libraries, nsjail, `runner-api`, `web/`, `image/run`, `image/nsjail.cfg`, the seccomp policy and `image/entrypoint`.
 - `image/entrypoint` replaces the base image's entry point, which prints a banner. It moves itself into a leaf cgroup, enables the `cpu`, `memory` and `pids` controllers for child cgroups, and then starts `runner-api`.
 - `runner-api` runs as root inside the container because nsjail needs that to create namespaces and cgroups. Every run executes as an unprivileged uid inside its own user namespace.
-- The host needs cgroup v2 and Docker Engine, Docker Desktop or rootful Podman; the flags in Context are Docker's, and untested with Podman. The container runs with those flags, each of which nsjail needs: `CAP_SYS_ADMIN` to create namespaces, mounts and cgroups; AppArmor unconfined, because Docker's AppArmor profile denies `mount`; Docker's masked paths unconfined, because the kernel refuses a new `/proc` while parts of the container's are masked; and `deploy/seccomp.json`, Docker's default seccomp profile with `pivot_root` allowed under `CAP_SYS_ADMIN`, because the default refuses it, and with no i386 or x32 calls on x86_64. `image/entrypoint` remounts `/sys/fs/cgroup` read-write, which Docker mounts read-only. The container keeps Docker's other capability limits, its device filter and its seccomp profile; `--privileged` also works but drops all three. The profile applies inside the jail too, but cannot tell the jail from nsjail, so the calls it allows nsjail under `CAP_SYS_ADMIN` pass it for the jail as well, and nsjail's own policy refuses them. Root in the container holds `CAP_SYS_ADMIN`, so the container is still not the security boundary: the jail is, and on the public instance a dedicated VM whose only secret is Caddy's TLS key is the outer boundary.
+- The host needs cgroup v2 and Docker Engine, Docker Desktop or rootful Podman; the flags in Context are Docker's, and untested with Podman. The container runs with those flags, each of which nsjail needs: every capability dropped but three, `CAP_SYS_ADMIN` to create namespaces, mounts and cgroups, and `CAP_SETUID` and `CAP_SETGID` to map the jail's uid and gid, which are not root's; AppArmor unconfined, because Docker's AppArmor profile denies `mount`; Docker's masked paths unconfined, because the kernel refuses a new `/proc` while parts of the container's are masked; and `deploy/seccomp.json`, Docker's default seccomp profile with `pivot_root` allowed under `CAP_SYS_ADMIN`, because the default refuses it, and with no i386 or x32 calls on x86_64. `image/entrypoint` remounts `/sys/fs/cgroup` read-write, which Docker mounts read-only. The container keeps Docker's device filter and seccomp profile; `--privileged` also works, but gives the container every capability and drops both. The profile applies inside the jail too, but cannot tell the jail from nsjail, so the calls it allows nsjail under `CAP_SYS_ADMIN` pass it for the jail as well, and nsjail's own policy refuses them. Root in the container holds `CAP_SYS_ADMIN`, so the container is still not the security boundary: the jail is, and on the public instance a dedicated VM whose only secret is Caddy's TLS key is the outer boundary.
 - The image keeps Dyalog's `LICENSE` file, as the base image's README requires for derived images. `THIRD_PARTY_NOTICES` lists TIO's frontend (MIT), pako (MIT and zlib), `abrudz/lb` (MIT), the APL387 and APL335 fonts (Unlicense), the APL logo (CC0) and nsjail (Apache-2.0); it ships in the repository and in the image.
 - The build sets three labels: the upstream image digest, the full Dyalog version (read from the interpreter during the build) and the source commit.
 - Published images cover amd64 only.
@@ -269,9 +270,10 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 
   ```
   docker build -t sandbox -f image/Containerfile .
-  docker run -d --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
-    --security-opt systempaths=unconfined --security-opt seccomp=deploy/seccomp.json \
-    --cgroupns private --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
+  docker run -d --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
+    --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+    --security-opt seccomp=deploy/seccomp.json --cgroupns private \
+    --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
   SANDBOX_URL=http://localhost:8000 go test -tags integration ./test/integration/...
   (cd test/ui && SANDBOX_URL=http://localhost:8000 npx playwright test)
   ```

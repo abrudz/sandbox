@@ -5,6 +5,7 @@ package integration
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,14 +13,12 @@ import (
 	"time"
 )
 
-// allowedCapabilities are the capabilities a sandbox container may hold,
-// by number: Docker's defaults, and SYS_ADMIN, which nsjail needs.
-var allowedCapabilities = map[string]uint{
-	"CHOWN": 0, "DAC_OVERRIDE": 1, "FOWNER": 3, "FSETID": 4, "KILL": 5,
-	"SETGID": 6, "SETUID": 7, "SETPCAP": 8, "NET_BIND_SERVICE": 10,
-	"NET_RAW": 13, "SYS_CHROOT": 18, "SYS_ADMIN": 21, "MKNOD": 27,
-	"AUDIT_WRITE": 29, "SETFCAP": 31,
-}
+// containerCapabilities are the only capabilities a sandbox container
+// holds, by number: SYS_ADMIN, with which the entry point remounts the
+// cgroup filesystem and Docker's seccomp profile allows nsjail's namespace,
+// mount and pivot_root calls, and SETUID and SETGID, with which nsjail maps
+// the jail's uid and gid, which are not its own.
+var containerCapabilities = map[string]uint{"SETGID": 6, "SETUID": 7, "SYS_ADMIN": 21}
 
 // dockerDevices are the entries Docker puts in an unprivileged container's
 // /dev.
@@ -55,12 +54,26 @@ func TestImageShipsThirdPartyNotices(t *testing.T) {
 	}
 }
 
+// jailConfig is the smallest nsjail configuration that jails a process as
+// runs are jailed: as uid and gid 99999, inside the jail and outside it.
+// nsjail's --uid_mapping and --gid_mapping options need newuidmap, which
+// the image does not have, and --user alone maps the jailed uid onto root
+// outside, which needs CAP_SETFCAP.
+const jailConfig = `mode: ONCE
+uidmap { inside_id: "99999" outside_id: "99999" }
+gidmap { inside_id: "99999" outside_id: "99999" }
+`
+
 func TestImageRunsAJailedProcess(t *testing.T) {
 	image := env(t, "SANDBOX_IMAGE")
+	config := filepath.Join(t.TempDir(), "jail.cfg")
+	if err := os.WriteFile(config, []byte(jailConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	args := append([]string{"run", "--rm"}, runFlags(t)...)
+	args := append([]string{"run", "--rm", "-v", config + ":/tmp/jail.cfg:ro"}, runFlags(t)...)
 	args = append(args, "--entrypoint", "nsjail", image,
-		"--mode", "o", "--chroot", "/", "--user", "99999", "--group", "99999", "--quiet",
+		"--config", "/tmp/jail.cfg", "--chroot", "/", "--quiet",
 		"--", "/bin/echo", "jailed")
 	out, err := docker(t, args...)
 	if err != nil {
@@ -86,33 +99,33 @@ func TestContainerDelegatesCgroupControllers(t *testing.T) {
 	}
 }
 
-func TestContainerHoldsNoCapabilityBeyondDockersDefaultsAndSysAdmin(t *testing.T) {
+func TestContainerHoldsOnlySysAdminSetuidAndSetgid(t *testing.T) {
 	name := env(t, "SANDBOX_CONTAINER")
+	var want uint64
+	for _, bit := range containerCapabilities {
+		want |= 1 << bit
+	}
 
-	out, err := docker(t, "exec", name, "grep", "CapBnd", "/proc/1/status")
+	out, err := docker(t, "exec", name, "grep", "-E", "^Cap(Eff|Bnd):", "/proc/1/status")
 	if err != nil {
-		t.Fatalf("reading the bounding set in %s: %v\n%s", name, err, out)
+		t.Fatalf("reading the capability sets in %s: %v\n%s", name, err, out)
 	}
-	fields := strings.Fields(out)
-	if len(fields) != 2 {
-		t.Fatalf("unexpected CapBnd line %q", strings.TrimSpace(out))
-	}
-	bounding, err := strconv.ParseUint(fields[1], 16, 64)
-	if err != nil {
-		t.Fatalf("parsing CapBnd %q: %v", fields[1], err)
-	}
-	var allowed uint64
-	for _, bit := range allowedCapabilities {
-		allowed |= 1 << bit
-	}
-	var extra []int
-	for bit := range 64 {
-		if bounding&^allowed&(1<<bit) != 0 {
-			extra = append(extra, bit)
+	sets := map[string]uint64{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			t.Fatalf("unexpected line %q", line)
 		}
+		n, err := strconv.ParseUint(fields[1], 16, 64)
+		if err != nil {
+			t.Fatalf("parsing %q: %v", line, err)
+		}
+		sets[strings.TrimSuffix(fields[0], ":")] = n
 	}
-	if len(extra) > 0 {
-		t.Errorf("the bounding set %s holds capabilities %v beyond Docker's defaults and SYS_ADMIN", fields[1], extra)
+	for _, set := range []string{"CapEff", "CapBnd"} {
+		if got, ok := sets[set]; !ok || got != want {
+			t.Errorf("%s %016x, want %016x: SYS_ADMIN, SETUID and SETGID alone", set, got, want)
+		}
 	}
 }
 

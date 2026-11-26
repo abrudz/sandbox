@@ -200,6 +200,7 @@ func TestPerClientLimitsApplyToTheAddressCaddySaw(t *testing.T) {
 type hostConfig struct {
 	Privileged   bool
 	CapAdd       []string
+	CapDrop      []string
 	SecurityOpt  []string
 	CgroupnsMode string
 	// The Docker CLI and Compose record systempaths=unconfined as empty
@@ -222,15 +223,31 @@ func sandboxHostConfig(t *testing.T) hostConfig {
 	return hc
 }
 
-func TestSandboxContainerIsNotPrivilegedAndAddsOnlySysAdmin(t *testing.T) {
+func TestSandboxContainerIsNotPrivilegedAndHoldsOnlySysAdminSetuidAndSetgid(t *testing.T) {
 	hc := sandboxHostConfig(t)
 
 	if hc.Privileged {
 		t.Error("the sandbox container is privileged")
 	}
+	if !slices.Equal(hc.CapDrop, []string{"ALL"}) {
+		t.Errorf("the sandbox container drops capabilities %q, want ALL", hc.CapDrop)
+	}
 	// Docker accepts a capability with or without its CAP_ prefix.
-	if len(hc.CapAdd) != 1 || strings.TrimPrefix(hc.CapAdd[0], "CAP_") != "SYS_ADMIN" {
-		t.Errorf("the sandbox container adds capabilities %q, want SYS_ADMIN alone", hc.CapAdd)
+	var added []string
+	for _, c := range hc.CapAdd {
+		added = append(added, strings.TrimPrefix(c, "CAP_"))
+	}
+	slices.Sort(added)
+	if want := []string{"SETGID", "SETUID", "SYS_ADMIN"}; !slices.Equal(added, want) {
+		t.Errorf("the sandbox container adds capabilities %q, want %q", hc.CapAdd, want)
+	}
+	// SETGID, SETUID and SYS_ADMIN are bits 6, 7 and 21.
+	const want = "00000000002000c0"
+	out := command(t, "docker", "exec", sandboxContainer(t), "grep", "-E", "^Cap(Eff|Bnd):", "/proc/1/status")
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) != 2 || f[1] != want {
+			t.Errorf("%q, want %s", line, want)
+		}
 	}
 }
 

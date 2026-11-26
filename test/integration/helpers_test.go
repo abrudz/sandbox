@@ -165,7 +165,10 @@ func runFlags(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	return []string{
+		"--cap-drop", "ALL",
 		"--cap-add", "SYS_ADMIN",
+		"--cap-add", "SETUID",
+		"--cap-add", "SETGID",
 		"--security-opt", "apparmor=unconfined",
 		"--security-opt", "systempaths=unconfined",
 		"--security-opt", "seccomp=" + profile,

@@ -8,9 +8,13 @@ services:
   sandbox:
     image: ${SANDBOX_IMAGE}
     # nsjail creates namespaces, mounts and cgroups for every run; README.md
-    # says what each of these grants it.
+    # says what each of these grants it. No other capability is needed.
+    cap_drop:
+      - ALL
     cap_add:
       - SYS_ADMIN
+      - SETUID
+      - SETGID
     security_opt:
       - apparmor=unconfined
       - systempaths=unconfined

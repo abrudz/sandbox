@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Entry point of the sandbox image. Runs as root in a container with
-# CAP_SYS_ADMIN, AppArmor unconfined and a private cgroup namespace, where
-# /sys/fs/cgroup is the container's own cgroup (see README.md for the
-# docker run flags).
+# CAP_SYS_ADMIN, CAP_SETUID and CAP_SETGID only, AppArmor unconfined and a
+# private cgroup namespace, where /sys/fs/cgroup is the container's own
+# cgroup (see README.md for the docker run flags).
 #
 # nsjail puts each run in a child cgroup with cpu, memory and pids limits,
 # so those controllers must be enabled for child cgroups. cgroup v2 refuses

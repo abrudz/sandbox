@@ -43,6 +43,9 @@ FROM ${DYALOG_IMAGE}
 # The entry point configures cgroups and nsjail creates namespaces; both
 # need root inside the container. Runs execute as an unprivileged uid.
 USER root
+# Root holds no CAP_DAC_OVERRIDE, so its working directory is one it owns,
+# not the base image's /home/dyalog.
+WORKDIR /
 COPY --from=nsjail /out/runtime-packages /tmp/nsjail-runtime-packages
 # tini is PID 1 so that a jailed process orphaned by killing nsjail is
 # reaped instead of staying a zombie under runner-api.
