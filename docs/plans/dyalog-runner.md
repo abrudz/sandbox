@@ -301,7 +301,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 The dev container has no access to any Docker daemon and cannot create user namespaces, so the image is never built or run inside it. Root in the sandbox container holds `CAP_SYS_ADMIN` on whichever machine runs it, and the developer's machine holds Windows drives and credentials; container work therefore runs only on GitHub Actions runners.
 
 - **In the dev container:** `go test ./...` (unit tests, with the fake executor), `node --test` for the frontend's pure functions, and the linters.
-- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with the flags in Context, and running the integration and UI suites against it.
+- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with the flags in Context, and running the integration and UI suites against it. The deployment job provisions a runner with `deploy/setup-host` and that same image, checked by ID, so that `deploy/` and the image are tested together as publishing would release them.
 - **Red and green evidence for container tests** is a CI run. In those cycles the tests are committed and pushed to the issue's branch, opened as a draft pull request, before review. Review changes land as further commits on the branch, never as force pushes. Runs are followed with `gh run watch` and failures read with `gh run view --log-failed`.
 
 ## Risks

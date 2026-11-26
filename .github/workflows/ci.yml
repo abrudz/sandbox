@@ -72,11 +72,16 @@ jobs:
 
   deploy:
     name: Deployment
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: image
+    # The image job's build output is enough: the deployment is tested even
+    # when the integration or UI suites fail.
+    if: ${{ !cancelled() && needs.image.outputs.image-id != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-24.04
     # The runner stands in for the public instance's VM: deploy/setup-host
     # provisions it, with Caddy serving plain HTTP on localhost and the
     # image coming from a local registry the update test can publish to.
+    # The image is this run's candidate, the one publishing would push, so
+    # that deploy/ and the image are tested together as they will run.
     env:
       SITE_ADDRESS: http://localhost
       SANDBOX_IMAGE: localhost:5000/sandbox:latest
@@ -88,11 +93,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Publish the current image to a local registry
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sandbox-image
+
+      - name: Publish the candidate image to a local registry
+        env:
+          IMAGE_ID: ${{ needs.image.outputs.image-id }}
         run: |
+          zstd -dc sandbox-image.tar.zst | docker load
+          rm sandbox-image.tar.zst
+          if [ "$(docker image inspect -f '{{.Id}}' sandbox:ci)" != "$IMAGE_ID" ]; then
+            echo "::error::The artifact does not hold the image the build job built, $IMAGE_ID."
+            exit 1
+          fi
           docker run -d --name registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2
-          docker pull ghcr.io/abrudz/sandbox:latest
-          docker tag ghcr.io/abrudz/sandbox:latest "$SANDBOX_IMAGE"
+          docker tag sandbox:ci "$SANDBOX_IMAGE"
           docker push "$SANDBOX_IMAGE"
 
       - name: Provision this runner as the public instance
