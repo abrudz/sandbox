@@ -446,6 +446,40 @@ func TestApportCannotStart(t *testing.T) {
 	}
 }
 
+// unusedSocketModules are socket protocol and family modules, and 8021q,
+// which a socket ioctl loads: the kernel loads each when a process asks for
+// it, with no capability check, and the host has no use for any of them.
+var unusedSocketModules = []string{
+	"sctp", "dccp", "dccp_ipv4", "dccp_ipv6", "l2tp_ip", "l2tp_ip6", "smc",
+	"af_key", "appletalk", "atm", "ax25", "bluetooth", "caif_socket", "can",
+	"ieee802154_socket", "kcm", "llc2", "netrom", "nfc", "phonet", "qrtr",
+	"rds", "rose", "rxrpc", "tipc", "x25",
+	"8021q",
+}
+
+// modprobePlan returns what modprobe would do to load module, without
+// loading it.
+func modprobePlan(module string) (string, error) {
+	out, err := exec.Command("modprobe", "--dry-run", "--verbose", module).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func TestModprobeRefusesTheSocketModulesTheHostDoesNotUse(t *testing.T) {
+	for _, m := range unusedSocketModules {
+		if plan, _ := modprobePlan(m); !strings.Contains(plan, "install /bin/false") {
+			t.Errorf("modprobe would load %s: %q", m, plan)
+		}
+	}
+}
+
+func TestModprobeStillLoadsTheModulesDockerUses(t *testing.T) {
+	for _, m := range []string{"bridge", "veth", "overlay", "br_netfilter", "nf_nat"} {
+		if plan, err := modprobePlan(m); err != nil || strings.Contains(plan, "/bin/false") {
+			t.Errorf("modprobe would not load %s: %q, %v", m, plan, err)
+		}
+	}
+}
+
 func TestUnattendedUpgradesInstallUpdatesAndRebootWhenNeeded(t *testing.T) {
 	if status := command(t, "dpkg-query", "-W", "-f=${Status}", "unattended-upgrades"); status != "install ok installed" {
 		t.Errorf("unattended-upgrades package status %q", status)
