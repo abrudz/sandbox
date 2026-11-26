@@ -48,6 +48,9 @@ type Limits struct {
 	// the client (SANDBOX_TRUSTED_PROXIES: comma-separated addresses or
 	// networks). Without them, the peer address is the client.
 	TrustedProxies []netip.Prefix
+	// Socket is the Unix socket runner-api listens on instead of TCP port
+	// 8080 (SANDBOX_SOCKET: an absolute path). Empty means TCP.
+	Socket string
 }
 
 // Workspace is the interpreter's maximum workspace (MAXWS) in bytes: half

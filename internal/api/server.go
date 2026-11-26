@@ -88,6 +88,11 @@ func NewHandler(opts Options) *Server {
 	return s
 }
 
+// Listen returns the listener runner-api serves on: TCP port 8080.
+func Listen(socket string) (net.Listener, error) {
+	return net.Listen("tcp", ":8080")
+}
+
 // HTTPServer returns an http.Server that serves s on addr with the read and
 // idle timeouts in Options. The read timeout also bounds the headers.
 func (s *Server) HTTPServer(addr string) *http.Server {

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -112,16 +113,84 @@ func TestFirewallAllowsOnlySSHHTTPAndHTTPS(t *testing.T) {
 	}
 }
 
-func TestSandboxPortListensOnLoopbackOnly(t *testing.T) {
-	out := command(t, "ss", "-Hltn", "sport = :8080")
-
-	lines := strings.Split(out, "\n")
-	if out == "" {
-		t.Fatal("nothing listens on port 8080")
+func TestNothingListensOnPort8080(t *testing.T) {
+	if out := command(t, "ss", "-Hltn", "sport = :8080"); out != "" {
+		t.Errorf("port 8080 listens:\n%s", out)
 	}
-	for _, line := range lines {
-		if f := strings.Fields(line); len(f) < 4 || !strings.HasPrefix(f[3], "127.0.0.1:") {
-			t.Errorf("port 8080 listens beyond loopback: %s", line)
+}
+
+func TestSandboxContainerHasNoNetwork(t *testing.T) {
+	id := sandboxContainer(t)
+
+	if mode := command(t, "docker", "inspect", "-f", "{{.HostConfig.NetworkMode}}", id); mode != "none" {
+		t.Errorf("network mode %q, want none", mode)
+	}
+	if ifaces := command(t, "docker", "exec", id, "ls", "/sys/class/net"); ifaces != "lo" {
+		t.Errorf("network interfaces %q, want lo only", ifaces)
+	}
+}
+
+func TestSandboxContainerCannotConnectOutOrToTheHost(t *testing.T) {
+	id := sandboxContainer(t)
+	// Caddy listens on port 80 of every host address.
+	host := strings.Fields(command(t, "hostname", "-I"))[0]
+
+	for _, target := range []string{"1.1.1.1/80", host + "/80"} {
+		out, err := exec.Command("docker", "exec", id, "timeout", "10", "bash", "-c", "exec 3<>/dev/tcp/"+target).CombinedOutput()
+		if err == nil {
+			t.Errorf("root in the sandbox container connected to %s", target)
+		} else if !strings.Contains(string(out), "Network is unreachable") {
+			t.Errorf("connecting to %s: %v, %q; want an unreachable network", target, err, out)
+		}
+	}
+}
+
+// clientAt sends requests from the loopback address ip.
+func clientAt(ip string) *http.Client {
+	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(ip)}}
+	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{DialContext: dialer.DialContext}}
+}
+
+func TestPerClientLimitsApplyToTheAddressCaddySaw(t *testing.T) {
+	url := env(t, "SITE_ADDRESS") + "/api/v1/run"
+	run := func(c *http.Client, code string) (int, string) {
+		body, err := json.Marshal(map[string]any{"code": code, "input": "", "args": []string{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := c.Post(url, "application/json", bytes.NewReader(body))
+		if err != nil {
+			return 0, err.Error()
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	first, second := clientAt("127.0.0.2"), clientAt("127.0.0.3")
+
+	// Two runs in progress are the first client's limit.
+	type result struct {
+		status int
+		body   string
+	}
+	done := make(chan result, 2)
+	for range 2 {
+		go func() {
+			status, body := run(first, "⎕DL 3\n")
+			done <- result{status, body}
+		}()
+	}
+	time.Sleep(time.Second)
+
+	if status, body := run(first, "⎕←1\n"); status != http.StatusTooManyRequests {
+		t.Errorf("a third run from the first client: status %d, want 429: %s", status, body)
+	}
+	if status, body := run(second, "⎕←1\n"); status != http.StatusOK {
+		t.Errorf("a run from the second client: status %d, want 200: %s", status, body)
+	}
+	for range 2 {
+		if r := <-done; r.status != http.StatusOK {
+			t.Errorf("a run in progress from the first client: status %d, want 200: %s", r.status, r.body)
 		}
 	}
 }
