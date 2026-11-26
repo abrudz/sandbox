@@ -124,6 +124,32 @@ func TestOnlyAJobThatRunsNothingFromTheRepositoryCanWritePackages(t *testing.T) 
 	}
 }
 
+func TestTheOneJobThatWritesIssuesWritesNothingElse(t *testing.T) {
+	// The nsjail upstream check opens, updates and closes its issue; it runs
+	// the repository's code, so it must not be able to write anything else.
+	writers := 0
+	for file, lines := range workflows(t) {
+		top, jobs := split(lines)
+		if strings.Contains(strings.Join(top, "\n"), "issues: write") {
+			t.Errorf("%s: the workflow's own permissions include issues: write, which every job without permissions of its own gets", file)
+		}
+		for job, body := range jobs {
+			if !strings.Contains(strings.Join(body, "\n"), "issues: write") {
+				continue
+			}
+			writers++
+			for _, line := range body {
+				if p := strings.TrimSpace(line); strings.HasSuffix(p, ": write") && p != "issues: write" {
+					t.Errorf("%s: job %s writes issues and has %s too", file, job, p)
+				}
+			}
+		}
+	}
+	if writers != 1 {
+		t.Errorf("%d jobs can write issues, want 1, the nsjail upstream check", writers)
+	}
+}
+
 func TestThePublishingJobChecksTheImageIDBeforePushing(t *testing.T) {
 	found := false
 	for file, lines := range workflows(t) {
