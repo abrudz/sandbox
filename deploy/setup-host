@@ -15,11 +15,12 @@
 #   SANDBOX_IMAGE  the image to run, default ghcr.io/abrudz/sandbox:latest
 #
 # It installs Docker Engine and compose (unless present), ufw and unattended
-# upgrades; opens SSH, HTTP and HTTPS only; installs the instance in
-# /opt/sandbox, with limits sized to the host's memory and CPUs, and the
-# daily update timer; and starts the instance. Each
-# change is reported as it is made, and a run that finds nothing to change
-# reports "No changes".
+# upgrades; stops crashes starting a helper and the kernel loading socket
+# modules the host does not use; opens SSH, HTTP and HTTPS only; installs the
+# instance in /opt/sandbox, with limits sized to the host's memory and CPUs,
+# and the daily update timer; and starts the instance. Each change is
+# reported as it is made, and a run that finds nothing to change reports
+# "No changes".
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -121,6 +122,11 @@ if [ "$(sysctl -n kernel.core_pattern)" != core ]; then
 	sysctl -q -p /etc/sysctl.d/60-sandbox-core.conf
 	changed "set kernel.core_pattern to core"
 fi
+
+# Kernel modules. A run's socket calls can ask the kernel to load a socket
+# protocol or family module; modprobe refuses those the host does not use.
+# modprobe reads the file at every load.
+install_file "$here/60-sandbox-modules.conf" /etc/modprobe.d/60-sandbox-modules.conf 644
 
 # The firewall: the rules come first, so that enabling it never cuts off
 # SSH. 443/udp carries HTTP/3.
