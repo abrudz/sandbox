@@ -165,7 +165,7 @@ Added:
 ### Deployments
 
 - **Local instance:** any machine with Docker and cgroup v2, including WSL2 with Docker Desktop or Docker Engine. The `docker run` command in Context publishes the port on `127.0.0.1` only, so the instance is reachable from that machine alone.
-- **Public instance:** a dedicated Ubuntu 24.04 VM whose only secret is Caddy's TLS key. `deploy/compose.yaml` runs the sandbox container, with the flags in Context, and Caddy, which obtains the TLS certificate for `dyalog.run`, refuses request bodies larger than runner-api accepts, and proxies to the container. `deploy/setup-host` sizes the container to the VM: a memory limit of the VM's memory less 512 MiB, with no swap; one run per CPU, or fewer so that every 512 MiB run and 128 MiB for runner-api fit within that limit; and 64 processes per run plus 256. `runner-api` trusts `X-Forwarded-For` only from Caddy, for per-client limits. The inbound firewall allows 22, 80 and 443 only, and unattended security upgrades keep the kernel patched. apport is masked and the core pattern names a file, so no crash starts a helper on the host, and `runner-api` removes job directories left by an earlier process when it starts.
+- **Public instance:** a dedicated Ubuntu 24.04 VM whose only secret is Caddy's TLS key. `deploy/compose.yaml` runs the sandbox container, with the flags in Context, and Caddy, which obtains the TLS certificate for `dyalog.run`, refuses request bodies larger than runner-api accepts, and proxies to the container through a Unix socket in a volume the two share (`SANDBOX_SOCKET`). The sandbox container has no network but loopback (`network_mode: none`): nothing in it connects out, and runs have network namespaces of their own. `deploy/setup-host` sizes the container to the VM: a memory limit of the VM's memory less 512 MiB, with no swap; one run per CPU, or fewer so that every 512 MiB run and 128 MiB for runner-api fit within that limit; and 64 processes per run plus 256. `runner-api` takes the client from `X-Forwarded-For` only on its socket, which is open to root only, for per-client limits. The inbound firewall allows 22, 80 and 443 only, and unattended security upgrades keep the kernel patched. apport is masked and the core pattern names a file, so no crash starts a helper on the host, and `runner-api` removes job directories left by an earlier process when it starts.
 
 ### Repository layout
 
@@ -258,6 +258,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 - The README documents the local `docker run`; following it gives a working site at `http://localhost:8000` that other machines cannot reach.
 - `deploy/setup-host` turns a fresh Ubuntu 24.04 VM into the public instance (Docker Engine, compose, firewall, unattended upgrades, update timer), and rerunning it changes nothing and succeeds.
 - After provisioning, `scripts/smoke https://dyalog.run` passes: hello world, a timeout case and a no-network case.
+- The sandbox container has no network: root in it cannot connect out or to the VM, nothing listens on port 8080, and the per-client limits still tell apart clients that reach Caddy from different addresses.
 - The update timer brings in a newly published image without failing runs in progress.
 - Rebooting the VM brings the service and the timer back without manual steps.
 
@@ -300,7 +301,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
 The dev container has no access to any Docker daemon and cannot create user namespaces, so the image is never built or run inside it. Root in the sandbox container holds `CAP_SYS_ADMIN` on whichever machine runs it, and the developer's machine holds Windows drives and credentials; container work therefore runs only on GitHub Actions runners.
 
 - **In the dev container:** `go test ./...` (unit tests, with the fake executor), `node --test` for the frontend's pure functions, and the linters.
-- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with the flags in Context, and running the integration and UI suites against it.
+- **In CI** (`ci.yml`, on every push and pull request): building the image, starting it with the flags in Context, and running the integration and UI suites against it. The deployment job provisions a runner with `deploy/setup-host` and that same image, checked by ID, so that `deploy/` and the image are tested together as publishing would release them.
 - **Red and green evidence for container tests** is a CI run. In those cycles the tests are committed and pushed to the issue's branch, opened as a draft pull request, before review. Review changes land as further commits on the branch, never as force pushes. Runs are followed with `gh run watch` and failures read with `gh run view --log-failed`.
 
 ## Risks

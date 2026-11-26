@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -48,6 +49,9 @@ type Limits struct {
 	// the client (SANDBOX_TRUSTED_PROXIES: comma-separated addresses or
 	// networks). Without them, the peer address is the client.
 	TrustedProxies []netip.Prefix
+	// Socket is the Unix socket runner-api listens on instead of TCP port
+	// 8080 (SANDBOX_SOCKET: an absolute path). Empty means TCP.
+	Socket string
 }
 
 // Workspace is the interpreter's maximum workspace (MAXWS) in bytes: half
@@ -121,6 +125,13 @@ func FromEnv(getenv func(string) string) (Limits, error) {
 			return Limits{}, fmt.Errorf("SANDBOX_TRUSTED_PROXIES=%q: %v", s, err)
 		}
 		limits.TrustedProxies = proxies
+	}
+
+	if v := getenv("SANDBOX_SOCKET"); v != "" {
+		if !filepath.IsAbs(v) {
+			return Limits{}, fmt.Errorf("SANDBOX_SOCKET=%q: want an absolute path", v)
+		}
+		limits.Socket = v
 	}
 
 	if v := getenv("SANDBOX_TIMEOUT"); v != "" {

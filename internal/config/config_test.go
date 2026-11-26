@@ -159,6 +159,25 @@ func TestWorkspaceIsHalfTheMemoryLimit(t *testing.T) {
 	}
 }
 
+func TestSandboxSocketSetsTheSocketToListenOn(t *testing.T) {
+	got, err := config.FromEnv(environment(map[string]string{"SANDBOX_SOCKET": "/run/sandbox/runner-api.sock"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Socket != "/run/sandbox/runner-api.sock" {
+		t.Fatalf("socket %q, want /run/sandbox/runner-api.sock", got.Socket)
+	}
+}
+
+func TestSandboxSocketMustBeAnAbsolutePath(t *testing.T) {
+	_, err := config.FromEnv(environment(map[string]string{"SANDBOX_SOCKET": "runner-api.sock"}))
+
+	if err == nil || !strings.Contains(err.Error(), "SANDBOX_SOCKET") {
+		t.Fatalf("error %v, want one naming SANDBOX_SOCKET", err)
+	}
+}
+
 func TestDotNetHeapIsAQuarterOfTheMemoryLimit(t *testing.T) {
 	for memory, want := range map[string]int64{"": 128 << 20, "256M": 64 << 20} {
 		got, err := config.FromEnv(environment(map[string]string{"SANDBOX_MEMORY": memory}))

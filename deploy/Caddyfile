@@ -9,5 +9,7 @@
 	request_body {
 		max_size 484KiB
 	}
-	reverse_proxy 127.0.0.1:8080
+	# runner-api's socket, in the volume shared with the sandbox container,
+	# which has no network.
+	reverse_proxy unix//run/sandbox/runner-api.sock
 }

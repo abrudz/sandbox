@@ -91,12 +91,16 @@ func main() {
 		Commit:            commit,
 		Timeout:           limits.Timeout,
 	})
-	srv := handler.HTTPServer(":8080")
+	ln, err := api.Listen(limits.Socket)
+	if err != nil {
+		log.Fatalf("listening: %v", err)
+	}
+	srv := handler.HTTPServer(ln.Addr().String())
 
 	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	served := make(chan error, 1)
-	go func() { served <- srv.ListenAndServe() }()
+	go func() { served <- srv.Serve(ln) }()
 	log.Printf("runner-api listening on %s (Dyalog %s from %s, commit %s; per run: timeout %v, output %d bytes per stream, "+
 		"memory %d bytes, workspace %d bytes, .NET heap %d bytes, %g CPUs, %d processes; requests: %d bytes, "+
 		"%d runs at once, %d per client, %d per client per minute; trusted proxies %v)",

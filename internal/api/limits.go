@@ -140,10 +140,12 @@ func (a *admission) sweep(now time.Time) {
 // clientOf identifies the client behind r. A trusted proxy appends the
 // address it saw to X-Forwarded-For, so the client is the right-most entry
 // that is not itself a trusted proxy; entries further left are the client's
-// own claims. Any other peer is the client.
+// own claims. A peer on a Unix socket is a trusted proxy, because only a
+// process as privileged as runner-api can open the socket (see Listen).
+// Any other peer is the client.
 func (s *Server) clientOf(r *http.Request) string {
 	peer := peerAddr(r)
-	if !s.trusted(peer) {
+	if !onUnixSocket(r) && !s.trusted(peer) {
 		return clientKey(peer)
 	}
 	entries := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
@@ -184,6 +186,12 @@ func peerAddr(r *http.Request) netip.Addr {
 		return netip.Addr{}
 	}
 	return addr.Unmap()
+}
+
+// onUnixSocket reports whether r arrived on a Unix socket.
+func onUnixSocket(r *http.Request) bool {
+	addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	return ok && addr.Network() == "unix"
 }
 
 func (s *Server) trusted(addr netip.Addr) bool {
