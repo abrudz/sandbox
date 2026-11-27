@@ -427,6 +427,10 @@ function clearState() {
 	});
 }
 
+// firstFormatFields are the fields TIO's first permalink format may set,
+// besides the arguments; each is also the id of its text area.
+var firstFormatFields = ["header", "code", "footer", "input"];
+
 // hashToState shows the state in a permalink, and returns the permalink's
 // language, or undefined if the permalink cannot be decoded.
 function hashToState(hash) {
@@ -441,12 +445,10 @@ function hashToState(hash) {
 				fieldArrayToState(field[1].split("+").map(function(arg) { return byteStringToText(base64ToByteString(arg)); }), $("#cla-wrapper"));
 				continue;
 			}
-			if (field[1] && field[0] !== "debug") {
-				var element = $("#" + field[0]);
-				if (element === null)
-					continue;
-				textToTextArea(byteStringToText(base64ToByteString(field[1])), element);
-			}
+			// Only the program's own fields; any other name, such as output or
+			// debug, would set an element the link does not own.
+			if (field[1] && firstFormatFields.indexOf(field[0]) >= 0)
+				textToTextArea(byteStringToText(base64ToByteString(field[1])), $("#" + field[0]));
 		}
 		return hashArray[0];
 	}
@@ -592,6 +594,21 @@ function refreshActiveField() {
 }
 
 function boot() {
+	// Adding and removing argument fields and closing messages, whose
+	// templates are cloned: one listener serves every copy, and the page's
+	// Content Security Policy refuses inline handlers.
+	document.addEventListener("click", function(event) {
+		var element = event.target.closest(".array-add, .array-remove, .message");
+		if (element === null)
+			return;
+		if (element.classList.contains("array-add"))
+			addField(element);
+		else if (element.classList.contains("array-remove"))
+			element.parentNode.parentNode.removeChild(element.parentNode);
+		else
+			element.parentNode.removeChild(element);
+	});
+
 	iterate($$("h3 label span"), function(element) {
 		var svg = clone("#templates > .bullet");
 		element.parentNode.insertBefore(svg, element);

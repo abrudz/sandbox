@@ -506,6 +506,13 @@ func TestSandboxCpusSetsTheCPULimit(t *testing.T) {
 	}
 }
 
+func TestARunWritesAndReadsAFileByARelativeName(t *testing.T) {
+	// The working directory is /home/run, a tmpfs of the run's own.
+	r := run(t, "_←(⊂'hello')⎕NPUT'note.txt'\n⎕←⊃⎕NGET'note.txt'\n", "")
+
+	assertRunLines(t, r, "hello")
+}
+
 func TestARunSeesTheJailsOwnNetworkFilesNotTheContainers(t *testing.T) {
 	// Docker writes the container's resolvers, address and name into its
 	// /etc/resolv.conf, /etc/hosts and /etc/hostname at run time.

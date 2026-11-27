@@ -682,8 +682,71 @@ test("a permalink with more than 256 arguments opens nothing and says why, in ei
   await page.goto("/" + codec.fieldsToPermalink(["apl-dyalog", "", "⎕←1", "", "", ...args]));
   await expectNothingOpened(page, /more than 256 arguments/);
 
-  const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
-  await page.goto("/#apl-dyalog#code=" + b64("⎕←1") + "&args=" + args.map(b64).join("+"));
+  await page.goto(firstFormatLink([["code", "⎕←1"], ["args", args]]));
   await page.reload();
   await expectNothingOpened(page, /more than 256 arguments/);
+});
+
+// firstFormatLink returns a permalink in TIO's first format,
+// language#name=base64&…, for fields given as [name, value] pairs, with
+// args as one field of base64 arguments joined by "+". TIO's base64 has no
+// padding and "@" for "+", since "=" and "+" separate the fields.
+function firstFormatLink(fields) {
+  const b64 = (text) => Buffer.from(text, "utf8").toString("base64").replace(/\+/g, "@").replace(/=+$/, "");
+  return "/#apl-dyalog#" + fields.map(([name, value]) =>
+    name + "=" + (Array.isArray(value) ? value.map(b64).join("+") : b64(value))).join("&");
+}
+
+test("a first-format permalink opens its header, code, footer, input and arguments", async ({ page }) => {
+  await page.goto(firstFormatLink([
+    ["header", "h←1"], ["code", "⎕←h"], ["footer", "⍝ end"], ["input", "line"], ["args", ["first", "second"]],
+  ]));
+
+  await expect(page.locator("#header")).toHaveValue("h←1");
+  await expect(page.locator("#code")).toHaveValue("⎕←h");
+  await expect(page.locator("#footer")).toHaveValue("⍝ end");
+  await expect(page.locator("#input")).toHaveValue("line");
+  await expect(page.locator("#cla-wrapper textarea")).toHaveCount(2);
+  await expect(page.locator("#cla-wrapper textarea").first()).toHaveValue("first");
+});
+
+test("a first-format permalink cannot set Output or any other element", async ({ page }) => {
+  // Without code the permalink does not run, so Output keeps what it was given.
+  await page.goto(firstFormatLink([["input", "line"], ["output", "forged"], ["lang-example", "forged"]]));
+
+  await expect(page.locator("#input")).toHaveValue("line");
+  await expect(page.locator("#output")).not.toHaveValue("forged");
+  expect(await page.locator("#lang-example").evaluate((element) => element.value)).toBeUndefined();
+});
+
+test("using the page breaks none of its Content Security Policy", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.policyViolations = [];
+    document.addEventListener("securitypolicyviolation", (event) =>
+      window.policyViolations.push(event.violatedDirective + " " + event.blockedURI));
+  });
+
+  // A message, closed by clicking it.
+  await page.goto("/" + fixtures.javascript.fragment);
+  const message = page.locator("#messages .message", { hasText: "The requested language could not be found" });
+  await expect(message).toBeVisible();
+  await message.click();
+  await expect(message).toHaveCount(0);
+  const violations = await page.evaluate(() => window.policyViolations);
+
+  // Arguments added and removed, a run, and a permalink.
+  await page.goto("/");
+  await page.fill("#code", "⎕←2+2");
+  await openSection(page, "arguments");
+  await addArgument(page, "first");
+  await addArgument(page, "second");
+  await page.locator("#cla-wrapper .array-remove").first().click();
+  await expect(page.locator("#cla-wrapper textarea")).toHaveCount(1);
+  await expect(page.locator("#cla-wrapper textarea")).toHaveValue("second");
+  await page.locator("#code").press("Control+Enter");
+  await expect(page.locator("#output")).toHaveValue("4\n");
+  await page.click("#permalink");
+
+  violations.push(...await page.evaluate(() => window.policyViolations));
+  expect(violations).toEqual([]);
 });
