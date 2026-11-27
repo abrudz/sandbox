@@ -4,6 +4,10 @@ const { test, expect } = require("@playwright/test");
 const { execFileSync } = require("node:child_process");
 const fixtures = require("./fixtures.js");
 
+// The page's permalink codec, run here to build permalinks.
+globalThis.pako = require("../../web/pako.min.js");
+const codec = require("../../web/codec.js");
+
 // openSection expands a collapsed TIO section (header, footer, input, arguments).
 async function openSection(page, name) {
   if (!(await page.locator(`#toggle-${name}`).isChecked()))
@@ -656,4 +660,30 @@ test("the favicon stays the logo while a run is in progress", async ({ page }) =
   await expect(page.locator("#run")).not.toHaveClass(/running/, { timeout: 10_000 });
   seen.push(await favicon(page));
   expect(seen).toEqual([idle, idle, idle, idle]);
+});
+
+// expectNothingOpened checks that the page refused a permalink with a message
+// matching reason, and set no field and ran nothing.
+async function expectNothingOpened(page, reason) {
+  await expect(page.locator("#messages .message", { hasText: reason })).toBeVisible();
+  await expect(page.locator("#code")).toHaveValue("");
+  await expect(page.locator("#cla-wrapper textarea")).toHaveCount(0);
+  await expect(page.locator("#output")).toHaveValue("");
+}
+
+test("a permalink whose fields would inflate past 1 MiB opens nothing and says why", async ({ page }) => {
+  await page.goto("/" + codec.fieldsToPermalink(["apl-dyalog", "", "x".repeat(16 << 20), "", ""]));
+
+  await expectNothingOpened(page, /more than 1 MiB/);
+});
+
+test("a permalink with more than 256 arguments opens nothing and says why, in either format", async ({ page }) => {
+  const args = Array.from({ length: 300 }, () => "a");
+  await page.goto("/" + codec.fieldsToPermalink(["apl-dyalog", "", "⎕←1", "", "", ...args]));
+  await expectNothingOpened(page, /more than 256 arguments/);
+
+  const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
+  await page.goto("/#apl-dyalog#code=" + b64("⎕←1") + "&args=" + args.map(b64).join("+"));
+  await page.reload();
+  await expectNothingOpened(page, /more than 256 arguments/);
 });
