@@ -79,7 +79,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | Requirement | Mechanism (nsjail, cgroups v2) | Default |
 |---|---|---|
 | No network | new network namespace (only loopback exists) | always on |
-| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
+| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only, with `/etc` a copy of the image's own made at build time, so that nothing Docker writes into the container's `/etc` (resolvers, address, name) reaches a run; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
 | CPU | cgroup `cpu.max` | 1 CPU |
 | Wall-clock time | nsjail time limit, plus a kill from the executor when its context is cancelled | 10 s |
 | Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` and the .NET heap limit below the limit | 512 MiB; `MAXWS=256M`; .NET heap 128 MiB |
