@@ -13,7 +13,7 @@ curl -LO https://raw.githubusercontent.com/abrudz/sandbox/main/deploy/seccomp.js
 docker run --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
   --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
   --security-opt seccomp=seccomp.json --cgroupns private \
-  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+  --read-only --tmpfs /tmp:size=16m -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 Then open http://localhost:8000, type a program such as `⎕←2+2`, and press Ctrl-Enter to run it. Permalinks have TIO's format, so a tio.run link for APL (Dyalog Unicode) opens here with `https://tio.run/` replaced by `http://localhost:8000/`.
@@ -29,6 +29,8 @@ nsjail builds a jail for every run. `--cap-drop ALL` drops every capability, and
 - `seccomp=seccomp.json`: Docker's default seccomp profile, which refuses `pivot_root`, with `pivot_root` allowed under `CAP_SYS_ADMIN`. It also refuses i386 and x32 system calls on x86_64, which Docker's default allows.
 
 `--cgroupns private`, Docker's default on cgroup v2, gives the container a cgroup namespace of its own. The entry point changes the cgroup at the root of that namespace, so it refuses to start in the host's.
+
+`--read-only` keeps the image's files from changing while the container runs. runner-api keeps each job's code, and nsjail its work directories, on the tmpfs at `/tmp`; runs write only to tmpfs mounts nsjail creates for each run.
 
 The container holds no other capability, and keeps Docker's device filter and seccomp profile. Root in it still holds `CAP_SYS_ADMIN`, so run only images you trust. Do not use `--privileged` in place of these options: besides every capability and the host's devices, it gives the container no seccomp profile, and the jail's own filter does not check x32 system calls, which the profile refuses.
 

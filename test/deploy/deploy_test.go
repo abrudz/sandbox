@@ -211,6 +211,10 @@ type hostConfig struct {
 	Memory     int64
 	MemorySwap int64
 	PidsLimit  *int64
+	// ReadonlyRootfs and Tmpfs, by mount point, are the root filesystem's
+	// mode and the tmpfs mounts.
+	ReadonlyRootfs bool
+	Tmpfs          map[string]string
 }
 
 func sandboxHostConfig(t *testing.T) hostConfig {
@@ -221,6 +225,17 @@ func sandboxHostConfig(t *testing.T) hostConfig {
 		t.Fatalf("parsing the sandbox container's HostConfig: %v\n%s", err, out)
 	}
 	return hc
+}
+
+func TestSandboxContainerHasAReadOnlyRootFilesystemAndATmpfsAtTmp(t *testing.T) {
+	hc := sandboxHostConfig(t)
+
+	if !hc.ReadonlyRootfs {
+		t.Error("the sandbox container's root filesystem is writable")
+	}
+	if _, ok := hc.Tmpfs["/tmp"]; !ok {
+		t.Errorf("the sandbox container's tmpfs mounts are %v, want one at /tmp", hc.Tmpfs)
+	}
 }
 
 func TestSandboxContainerIsNotPrivilegedAndHoldsOnlySysAdminSetuidAndSetgid(t *testing.T) {

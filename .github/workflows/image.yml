@@ -100,7 +100,8 @@ jobs:
           docker run -d --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
             --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             --security-opt seccomp="$PWD/deploy/seccomp.json" \
-            --cgroupns private --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
+            --cgroupns private --read-only --tmpfs /tmp:size=16m \
+            --name "$SANDBOX_CONTAINER" -p 127.0.0.1:8000:8080 \
             -e SANDBOX_CLIENT_RATE=100000 "$SANDBOX_IMAGE"
           for _ in $(seq 30); do
             if curl -s -o /dev/null "$SANDBOX_URL/"; then
