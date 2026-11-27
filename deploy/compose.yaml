@@ -24,6 +24,12 @@ services:
     # The entry point changes the cgroup at the root of its namespace, which
     # must be the container's own whatever the daemon's default.
     cgroup: private
+    # The image's files cannot change while it runs. runner-api keeps each
+    # job's code, and nsjail its work directories, on this tmpfs; runs write
+    # only to tmpfs mounts nsjail creates for each run.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     # deploy/setup-host derives these from the VM's memory and CPUs: the
     # host keeps 512 MiB beyond the container's limit, and the container's
     # concurrent runs fit within it.

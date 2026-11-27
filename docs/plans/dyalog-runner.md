@@ -10,7 +10,7 @@ The deliverable is one container image that runs the whole service:
 docker run --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
   --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
   --security-opt seccomp=deploy/seccomp.json --cgroupns private \
-  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+  --read-only --tmpfs /tmp:size=16m -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 The backend is new; the frontend is taken from TIO, which is MIT-licensed:
@@ -273,7 +273,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
   docker run -d --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
     --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
     --security-opt seccomp=deploy/seccomp.json --cgroupns private \
-    --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
+    --read-only --tmpfs /tmp:size=16m --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
   SANDBOX_URL=http://localhost:8000 go test -tags integration ./test/integration/...
   (cd test/ui && SANDBOX_URL=http://localhost:8000 npx playwright test)
   ```
