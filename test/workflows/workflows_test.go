@@ -180,3 +180,40 @@ func TestThePublishingJobChecksTheImageIDBeforePushing(t *testing.T) {
 		t.Error("no job that can write packages pushes an image")
 	}
 }
+
+// dockerRuns returns each "docker run" command in a workflow, with its
+// continuation lines joined.
+func dockerRuns(lines []string) []string {
+	var runs []string
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "docker run ") {
+			continue
+		}
+		for strings.HasSuffix(line, `\`) && i+1 < len(lines) {
+			i++
+			line = strings.TrimSuffix(line, `\`) + " " + strings.TrimSpace(lines[i])
+		}
+		runs = append(runs, line)
+	}
+	return runs
+}
+
+func TestEveryImageAWorkflowStartsIsNamedByDigest(t *testing.T) {
+	// The image is the command's last word, as no workflow passes the
+	// container a command. A shell variable names the image the job built
+	// itself, which it checks by ID.
+	digest := regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+	for file, lines := range workflows(t) {
+		for _, run := range dockerRuns(lines) {
+			words := strings.Fields(run)
+			image := strings.Trim(words[len(words)-1], `"`)
+			if strings.HasPrefix(image, "$") {
+				continue
+			}
+			if !digest.MatchString(image) {
+				t.Errorf("%s: %s is not named by digest: %s", file, image, run)
+			}
+		}
+	}
+}
