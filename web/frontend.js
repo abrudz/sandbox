@@ -592,6 +592,21 @@ function refreshActiveField() {
 }
 
 function boot() {
+	// Adding and removing argument fields and closing messages, whose
+	// templates are cloned: one listener serves every copy, and the page's
+	// Content Security Policy refuses inline handlers.
+	document.addEventListener("click", function(event) {
+		var element = event.target.closest(".array-add, .array-remove, .message");
+		if (element === null)
+			return;
+		if (element.classList.contains("array-add"))
+			addField(element);
+		else if (element.classList.contains("array-remove"))
+			element.parentNode.parentNode.removeChild(element.parentNode);
+		else
+			element.parentNode.removeChild(element);
+	});
+
 	iterate($$("h3 label span"), function(element) {
 		var svg = clone("#templates > .bullet");
 		element.parentNode.insertBefore(svg, element);
