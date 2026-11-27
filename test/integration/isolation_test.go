@@ -505,3 +505,10 @@ func TestSandboxCpusSetsTheCPULimit(t *testing.T) {
 		t.Errorf("CPU time %d ms in %d ms wall-clock time: the busy loop did not run", cpu, wall)
 	}
 }
+
+func TestARunWritesAndReadsAFileByARelativeName(t *testing.T) {
+	// The working directory is /home/run, a tmpfs of the run's own.
+	r := run(t, "_←(⊂'hello')⎕NPUT'note.txt'\n⎕←⊃⎕NGET'note.txt'\n", "")
+
+	assertRunLines(t, r, "hello")
+}

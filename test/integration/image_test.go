@@ -129,6 +129,22 @@ func TestContainerHoldsOnlySysAdminSetuidAndSetgid(t *testing.T) {
 	}
 }
 
+func TestRootInTheContainerCanWriteOnlyToTmp(t *testing.T) {
+	// Root there holds no CAP_DAC_OVERRIDE, but owns these directories.
+	name := env(t, "SANDBOX_CONTAINER")
+	for _, path := range []string{"/marker", "/etc/marker", "/usr/local/bin/marker", "/var/marker"} {
+		out, err := docker(t, "exec", name, "sh", "-c", "touch "+path+" && rm "+path)
+		if err == nil || !strings.Contains(out, "Read-only file system") {
+			t.Errorf("creating %s: %v, %q; want a read-only file system", path, err, out)
+		}
+	}
+
+	out, err := docker(t, "exec", name, "sh", "-c", "touch /tmp/marker && rm /tmp/marker && stat -f -c %T /tmp")
+	if err != nil || strings.TrimSpace(out) != "tmpfs" {
+		t.Errorf("writing to /tmp and reading its file system type: %v, %q; want tmpfs", err, out)
+	}
+}
+
 func TestContainerHasOnlyDockersDefaultDevices(t *testing.T) {
 	name := env(t, "SANDBOX_CONTAINER")
 
