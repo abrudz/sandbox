@@ -107,7 +107,7 @@ jobs:
             echo "::error::The artifact does not hold the image the build job built, $IMAGE_ID."
             exit 1
           fi
-          docker run -d --name registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2
+          docker run -d --name registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
           docker tag sandbox:ci "$SANDBOX_IMAGE"
           docker push "$SANDBOX_IMAGE"
 
