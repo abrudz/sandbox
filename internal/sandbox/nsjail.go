@@ -41,12 +41,18 @@ type Nsjail struct {
 
 // nsjail logs the jailed process's fate at level INFO; without one of these
 // lines the job never ran. Its own exit status cannot tell the two apart,
-// because it reports a signal N as status 128+N.
+// because it reports a signal N as status 128+N. Only whole lines in
+// nsjail's INFO format count: below INFO it writes the run's arguments into
+// the log, where an argument could hold the same words.
 var (
-	exitedLine     = regexp.MustCompile(`exited with status: (\d+)`)
-	terminatedLine = regexp.MustCompile(`terminated with signal: (\w+) \(\d+\)`)
-	timeLimitLine  = regexp.MustCompile(`run time >= time limit`)
+	exitedLine     = regexp.MustCompile(`(?m)^\[I\]\[[^\]\n]*\] pid=\d+ \(\[STANDALONE MODE\]\) exited with status: (\d+), \(PIDs left: \d+\)$`)
+	terminatedLine = regexp.MustCompile(`(?m)^\[I\]\[[^\]\n]*\] pid=\d+ \(\[STANDALONE MODE\]\) terminated with signal: (\w+) \(\d+\), \(PIDs left: \d+\)$`)
+	timeLimitLine  = regexp.MustCompile(`(?m)^\[I\]\[[^\]\n]*\] pid=\d+ run time >= time limit \(\d+ >= \d+\) \(\[STANDALONE MODE\]\)\. Killing it$`)
 )
+
+// logLimit is the number of bytes kept from nsjail's log; the rest is
+// drained. At INFO the log is a few lines.
+const logLimit = 64 << 10
 
 // stopGrace is how long nsjail has to kill and reap the jail after SIGTERM
 // before it is killed itself. The jailed process then dies through its
@@ -115,8 +121,9 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 	logW.Close()
 	logged := make(chan []byte, 1)
 	go func() {
-		b, _ := io.ReadAll(logR)
-		logged <- b
+		kept := &capped{limit: logLimit}
+		_, _ = io.Copy(kept, logR)
+		logged <- kept.buf.Bytes()
 	}()
 	waitErr := cmd.Wait()
 	wall := time.Since(start)
