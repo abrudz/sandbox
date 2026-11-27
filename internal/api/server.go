@@ -134,11 +134,16 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 const contentSecurityPolicy = "default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 // ServeHTTP implements http.Handler. Every response forbids content-type
-// sniffing and carries the page's Content Security Policy. While draining,
-// every new request gets 503, so a proxy in front stops sending traffic.
+// sniffing, and the page, the one HTML document, carries its Content
+// Security Policy; the scripts, styles and fonts it loads are bound by the
+// page's policy, and the favicon, an SVG with its own style, by none. While
+// draining, every new request gets 503, so a proxy in front stops sending
+// traffic.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	if r.URL.Path == "/" {
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	}
 	s.admission.mu.Lock()
 	draining := s.admission.draining
 	s.admission.mu.Unlock()
