@@ -138,7 +138,7 @@ Kept from TIO's interpreter page:
 - The language heading with its "Hello World" example.
 - Collapsible Header, Code (with TIO's character and byte count), Footer, Input, Arguments, Output and Debug sections.
 - The permalink copy wizard and its formats: Plain URL, HTML, Wiki markup, Markdown, Code Golf submission (Stack Exchange) and BBCode.
-- TIO's permalink format, stored in the URL fragment. A tio.run `apl-dyalog` permalink opens with all its fields when its host is replaced by this site's; the program then runs under `dyalogscript`, not TIO's wrapper.
+- TIO's permalink format, stored in the URL fragment. A tio.run `apl-dyalog` permalink opens with all its fields when its host is replaced by this site's; the program then runs under `dyalogscript`, not TIO's wrapper. The page opens a permalink whose fields come to at most 1 MiB, with at most 256 arguments, sixteen times what runner-api accepts by default; it stops inflating one past that, and opens nothing, saying why. In TIO's first format, `name=value&…`, only the header, code, footer, input and arguments are read.
 
 Changed:
 

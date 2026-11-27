@@ -434,42 +434,67 @@ var firstFormatFields = ["header", "code", "footer", "input"];
 // hashToState shows the state in a permalink, and returns the permalink's
 // language, or undefined if the permalink cannot be decoded.
 function hashToState(hash) {
+	try {
+		var state = decodePermalink(hash);
+	} catch(error) {
+		console.error(error);
+		// A permalink over the codec's limits says which; any other cannot
+		// be decoded at all.
+		sendMessage("Error", error instanceof RangeError ?
+			"The permalink was not opened: " + error.message + "." :
+			"The permalink could not be decoded.");
+		$("#toggle-interpreter").checked = false;
+		return undefined;
+	}
+	if (!state.fields)
+		return state.language;
+	clearState();
+	firstFormatFields.forEach(function(name) {
+		textToTextArea(state.fields[name] || "", $("#" + name));
+	});
+	fieldArrayToState(state.args, $("#cla-wrapper"));
+	return state.language;
+}
+
+// decodePermalink returns the language in a URL fragment and, unless the
+// fragment is a bare language, its fields by name and its arguments. It
+// checks the codec's limits before anything is shown, so a permalink over
+// them changes nothing on the page.
+function decodePermalink(hash) {
+	var fields = {};
 	if (/=/.test(hash)) {
 		// TIO's first permalink format: language#code=…&input=…&args=…
-		clearState();
 		var hashArray = hash.split("#");
-		var fields = hashArray[1].split("&");
-		for (var i = 0; i < fields.length; i++) {
-			var field = fields[i].split("=");
+		var pairs = hashArray[1].split("&");
+		var byteFields = [], byteArgs = [];
+		for (var i = 0; i < pairs.length; i++) {
+			var field = pairs[i].split("=");
 			if (field[0] == "args") {
-				fieldArrayToState(field[1].split("+").map(function(arg) { return byteStringToText(base64ToByteString(arg)); }), $("#cla-wrapper"));
+				var encoded = field[1].split("+");
+				if (encoded.length > maxPermalinkArguments)
+					throw new RangeError(tooManyArguments);
+				byteArgs = encoded.map(base64ToByteString);
 				continue;
 			}
 			// Only the program's own fields; any other name, such as output or
 			// debug, would set an element the link does not own.
-			if (field[1] && firstFormatFields.indexOf(field[0]) >= 0)
-				textToTextArea(byteStringToText(base64ToByteString(field[1])), $("#" + field[0]));
+			if (field[1] && firstFormatFields.indexOf(field[0]) >= 0) {
+				fields[field[0]] = base64ToByteString(field[1]);
+				byteFields.push(fields[field[0]]);
+			}
 		}
-		return hashArray[0];
+		checkFirstFormat(byteFields, byteArgs);
+		for (var name in fields)
+			fields[name] = byteStringToText(fields[name]);
+		return {language: hashArray[0], fields: fields, args: byteArgs.map(byteStringToText)};
 	}
-	try {
-		var permalink = parsePermalink(hash);
-		if (!permalink.fields)
-			return permalink.language;
-		var fieldArray = permalink.fields;
-		clearState();
-		textToTextArea(fieldArray[1] || "", $("#header"));
-		textToTextArea(fieldArray[2] || "", $("#code"));
-		textToTextArea(fieldArray[3] || "", $("#footer"));
-		textToTextArea(fieldArray[4] || "", $("#input"));
-		fieldArrayToState(fieldArray.slice(5), $("#cla-wrapper"));
-	} catch(error) {
-		console.error(error);
-		sendMessage("Error", "The permalink could not be decoded.");
-		$("#toggle-interpreter").checked = false;
-		return undefined;
-	}
-	return permalink.language;
+	var permalink = parsePermalink(hash);
+	if (!permalink.fields)
+		return {language: permalink.language, fields: null};
+	firstFormatFields.forEach(function(name, i) {
+		fields[name] = permalink.fields[i + 1];
+	});
+	return {language: permalink.language, fields: fields, args: permalink.fields.slice(5)};
 }
 
 function countCharacters(string) {
