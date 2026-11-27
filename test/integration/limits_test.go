@@ -115,6 +115,55 @@ func TestClosingTheConnectionKillsTheRunWithinOneSecond(t *testing.T) {
 	}
 }
 
+// killNsjailScript sends SIGKILL to every nsjail process in a container.
+const killNsjailScript = `
+for d in /proc/[0-9]*; do
+  [ "$(cat "$d/comm" 2>/dev/null)" = nsjail ] && kill -KILL "${d#/proc/}"
+done
+true
+`
+
+func TestARunWhoseNsjailIsKilledLeavesNothingOnceItsResponseArrives(t *testing.T) {
+	// nsjail removes the run's cgroup only in its own teardown, which a
+	// SIGKILL skips; the run's processes die only through nsjail's
+	// parent-death signal. A background process outlives the interpreter.
+	url, container := startContainer(t)
+	responded := make(chan struct{})
+	go func() {
+		defer close(responded)
+		body := strings.NewReader(`{"code":"_←⎕SH'sleep 30 >/dev/null 2>&1 &'\n⎕DL 30\n","input":"","args":[]}`)
+		req, err := http.NewRequest(http.MethodPost, url+"/api/v1/run", body)
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if resp, err := client.Do(req); err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	startDeadline := time.Now().Add(10 * time.Second)
+	for !slices.ContainsFunc(leftovers(t, container), isInterpreter) {
+		if time.Now().After(startDeadline) {
+			t.Fatalf("the interpreter did not start within 10 s")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if out, err := docker(t, "exec", container, "sh", "-c", killNsjailScript); err != nil {
+		t.Fatalf("killing nsjail: %v\n%s", err, out)
+	}
+	select {
+	case <-responded:
+	case <-time.After(15 * time.Second):
+		t.Fatal("no response within 15 s of killing nsjail")
+	}
+
+	if left := leftovers(t, container); len(left) > 0 {
+		t.Errorf("once the response arrived, the run whose nsjail was killed left %q", left)
+	}
+}
+
 // isInterpreter reports whether leftover is a running dyalog process.
 func isInterpreter(leftover string) bool {
 	f := strings.Fields(leftover)
