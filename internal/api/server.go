@@ -127,9 +127,18 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 	}
 }
 
-// ServeHTTP implements http.Handler. While draining, every new request
-// gets 503, so a proxy in front stops sending traffic.
+// contentSecurityPolicy lets the page load scripts, styles, fonts and images
+// and make requests from its own origin only, and allows no plugins, no
+// <base>, no form submissions and no framing. The page has no inline
+// scripts, handlers or styles, so the policy needs no 'unsafe-inline'.
+const contentSecurityPolicy = "default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// ServeHTTP implements http.Handler. Every response forbids content-type
+// sniffing and carries the page's Content Security Policy. While draining,
+// every new request gets 503, so a proxy in front stops sending traffic.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	s.admission.mu.Lock()
 	draining := s.admission.draining
 	s.admission.mu.Unlock()

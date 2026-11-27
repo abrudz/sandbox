@@ -130,6 +130,8 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 
 `web/` is a copy of TIO's frontend from `usr/share/tio.run/` (`index.html`, `frontend.js`, `frontend.css`, fonts, icons, `pako.min.js`), reduced to TIO's `apl-dyalog` language, whose name, link and Hello World program `frontend.js` holds in place of TIO's `languages.json`. TIO's build step (`sbin/tiobuild`) filled `${tio_*}` placeholders with content-hashed file names; the copy uses fixed paths instead.
 
+runner-api serves the page with a Content Security Policy that allows its own origin only, no plugins, no `<base>`, no form submissions and no framing, and with `X-Content-Type-Options: nosniff` on every response. The page has no inline scripts, handlers or styles, so the policy needs no `'unsafe-inline'`: TIO's inline `onclick` attributes are one delegated listener in `frontend.js`.
+
 Kept from TIO's interpreter page:
 
 - The toolbar: Run (Ctrl-Enter; clicking again cancels) and Permalink.
