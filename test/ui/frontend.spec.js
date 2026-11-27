@@ -657,3 +657,35 @@ test("the favicon stays the logo while a run is in progress", async ({ page }) =
   seen.push(await favicon(page));
   expect(seen).toEqual([idle, idle, idle, idle]);
 });
+
+test("using the page breaks none of its Content Security Policy", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.policyViolations = [];
+    document.addEventListener("securitypolicyviolation", (event) =>
+      window.policyViolations.push(event.violatedDirective + " " + event.blockedURI));
+  });
+
+  // A message, closed by clicking it.
+  await page.goto("/" + fixtures.javascript.fragment);
+  const message = page.locator("#messages .message", { hasText: "The requested language could not be found" });
+  await expect(message).toBeVisible();
+  await message.click();
+  await expect(message).toHaveCount(0);
+  const violations = await page.evaluate(() => window.policyViolations);
+
+  // Arguments added and removed, a run, and a permalink.
+  await page.goto("/");
+  await page.fill("#code", "⎕←2+2");
+  await openSection(page, "arguments");
+  await addArgument(page, "first");
+  await addArgument(page, "second");
+  await page.locator("#cla-wrapper .array-remove").first().click();
+  await expect(page.locator("#cla-wrapper textarea")).toHaveCount(1);
+  await expect(page.locator("#cla-wrapper textarea")).toHaveValue("second");
+  await page.locator("#code").press("Control+Enter");
+  await expect(page.locator("#output")).toHaveValue("4\n");
+  await page.click("#permalink");
+
+  violations.push(...await page.evaluate(() => window.policyViolations));
+  expect(violations).toEqual([]);
+});
