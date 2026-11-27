@@ -55,7 +55,7 @@ The public instance puts Caddy in front of the container for TLS.
 2. Before reading the body, `runner-api` counts the request against its client (or answers 429) and against the bodies being read at once (or answers 503). It reads and validates the request, takes a concurrency slot (or answers 429), and writes the code and the input into a fresh per-run directory.
 3. The executor starts nsjail with that directory mounted read-only at `/job` and the arguments on its command line. There is no shell, so arguments are never interpreted.
 4. Inside the jail, `image/run` runs the program with `dyalogscript` (below).
-5. The executor collects up to the output cap from each stream and keeps draining past it. It enforces the wall-clock limit, kills everything left in the run's cgroup, removes the per-run directory, and returns the result.
+5. The executor collects up to the output cap from each stream and keeps draining past it. It enforces the wall-clock limit. Each run has a cgroup of its own below the container's, inside which nsjail creates the limited one; once nsjail has exited, however it exited, the executor kills everything left in that cgroup, waits until it is empty, removes it and the per-run directory, and only then returns the result and frees the slot.
 
 ### Execution semantics
 
@@ -79,7 +79,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | Requirement | Mechanism (nsjail, cgroups v2) | Default |
 |---|---|---|
 | No network | new network namespace (only loopback exists) | always on |
-| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
+| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only, with `/etc` a copy of the image's own made at build time, so that nothing Docker writes into the container's `/etc` (resolvers, address, name) reaches a run; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
 | CPU | cgroup `cpu.max` | 1 CPU |
 | Wall-clock time | nsjail time limit, plus a kill from the executor when its context is cancelled | 10 s |
 | Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` and the .NET heap limit below the limit | 512 MiB; `MAXWS=256M`; .NET heap 128 MiB |

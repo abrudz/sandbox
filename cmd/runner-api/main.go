@@ -31,6 +31,8 @@ const (
 	commitFile   = "/usr/share/sandbox/commit"
 	webDir       = "/usr/share/sandbox/web"
 	jobsDir      = "/tmp/sandbox-jobs"
+	// The container's cgroup, whose controllers image/entrypoint delegates.
+	cgroupRoot = "/sys/fs/cgroup"
 )
 
 // Connection limits. A request arrives in full, headers and body, within
@@ -72,6 +74,7 @@ func main() {
 		Pids:        limits.Pids,
 		Workspace:   limits.Workspace(),
 		DotNetHeap:  limits.DotNetHeap(),
+		CgroupRoot:  cgroupRoot,
 		Logf:        log.Printf,
 	}
 	handler := api.NewHandler(api.Options{
