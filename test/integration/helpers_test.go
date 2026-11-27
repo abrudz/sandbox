@@ -173,6 +173,8 @@ func runFlags(t *testing.T) []string {
 		"--security-opt", "systempaths=unconfined",
 		"--security-opt", "seccomp=" + profile,
 		"--cgroupns", "private",
+		"--read-only",
+		"--tmpfs", "/tmp:size=16m",
 	}
 }
 

@@ -10,7 +10,7 @@ The deliverable is one container image that runs the whole service:
 docker run --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
   --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
   --security-opt seccomp=deploy/seccomp.json --cgroupns private \
-  -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
+  --read-only --tmpfs /tmp:size=16m -p 127.0.0.1:8000:8080 ghcr.io/abrudz/sandbox
 ```
 
 The backend is new; the frontend is taken from TIO, which is MIT-licensed:
@@ -55,7 +55,7 @@ The public instance puts Caddy in front of the container for TLS.
 2. Before reading the body, `runner-api` counts the request against its client (or answers 429) and against the bodies being read at once (or answers 503). It reads and validates the request, takes a concurrency slot (or answers 429), and writes the code and the input into a fresh per-run directory.
 3. The executor starts nsjail with that directory mounted read-only at `/job` and the arguments on its command line. There is no shell, so arguments are never interpreted.
 4. Inside the jail, `image/run` runs the program with `dyalogscript` (below).
-5. The executor collects up to the output cap from each stream and keeps draining past it. It enforces the wall-clock limit, kills everything left in the run's cgroup, removes the per-run directory, and returns the result.
+5. The executor collects up to the output cap from each stream and keeps draining past it. It enforces the wall-clock limit. Each run has a cgroup of its own below the container's, inside which nsjail creates the limited one; once nsjail has exited, however it exited, the executor kills everything left in that cgroup, waits until it is empty, removes it and the per-run directory, and only then returns the result and frees the slot.
 
 ### Execution semantics
 
@@ -79,7 +79,7 @@ Programs that rely on TIO's own wrapper (code fixed as a namespace script, unrea
 | Requirement | Mechanism (nsjail, cgroups v2) | Default |
 |---|---|---|
 | No network | new network namespace (only loopback exists) | always on |
-| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
+| No persistent state | new mount namespace; interpreter and system directories bind-mounted read-only, with `/etc` a copy of the image's own made at build time, so that nothing Docker writes into the container's `/etc` (resolvers, address, name) reaches a run; size-limited tmpfs for `/tmp` and the home directory; per-run directory removed afterwards | always on |
 | CPU | cgroup `cpu.max` | 1 CPU |
 | Wall-clock time | nsjail time limit, plus a kill from the executor when its context is cancelled | 10 s |
 | Memory | cgroup `memory.max`, `memory.swap.max` of 0; `MAXWS` and the .NET heap limit below the limit | 512 MiB; `MAXWS=256M`; .NET heap 128 MiB |
@@ -129,6 +129,8 @@ Each run shares the host kernel, and `⎕NA` lets user code make arbitrary syste
 ### Frontend
 
 `web/` is a copy of TIO's frontend from `usr/share/tio.run/` (`index.html`, `frontend.js`, `frontend.css`, fonts, icons, `pako.min.js`), reduced to TIO's `apl-dyalog` language, whose name, link and Hello World program `frontend.js` holds in place of TIO's `languages.json`. TIO's build step (`sbin/tiobuild`) filled `${tio_*}` placeholders with content-hashed file names; the copy uses fixed paths instead.
+
+runner-api serves the page with a Content Security Policy that allows its own origin only, no plugins, no `<base>`, no form submissions and no framing, and with `X-Content-Type-Options: nosniff` on every response. The page has no inline scripts, handlers or styles, so the policy needs no `'unsafe-inline'`: TIO's inline `onclick` attributes are one delegated listener in `frontend.js`.
 
 Kept from TIO's interpreter page:
 
@@ -273,7 +275,7 @@ Each item is one GitHub issue, in dependency order. Go unit tests run anywhere. 
   docker run -d --rm --cap-drop ALL --cap-add SYS_ADMIN --cap-add SETUID --cap-add SETGID \
     --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
     --security-opt seccomp=deploy/seccomp.json --cgroupns private \
-    --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
+    --read-only --tmpfs /tmp:size=16m --name sandbox-ci -p 127.0.0.1:8000:8080 sandbox
   SANDBOX_URL=http://localhost:8000 go test -tags integration ./test/integration/...
   (cd test/ui && SANDBOX_URL=http://localhost:8000 npx playwright test)
   ```

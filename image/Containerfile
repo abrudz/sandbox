@@ -86,6 +86,16 @@ LABEL org.opencontainers.image.title="sandbox" \
       org.opencontainers.image.revision="${COMMIT}"
 RUN printf '%s\n' "${DYALOG_DIGEST}" > /usr/share/sandbox/image-digest \
  && printf '%s\n' "${COMMIT}" > /usr/share/sandbox/commit
+# The jail's /etc (image/nsjail.cfg): the image's own, as built, so that
+# nothing Docker writes into the container's /etc at run time reaches a
+# run. A build step's resolv.conf, hosts and hostname are the build host's;
+# the copy has none of them, its own hosts and hostname instead, and no
+# password hashes or runner-api configuration.
+RUN cp -a /etc /usr/share/sandbox/etc \
+ && cd /usr/share/sandbox/etc \
+ && rm -rf resolv.conf hosts hostname shadow shadow- gshadow gshadow- sandbox \
+ && printf '127.0.0.1\tlocalhost\n::1\tlocalhost\n' > hosts \
+ && printf 'sandbox\n' > hostname
 # Dyalog's licence stays at /LICENSE, where the base image puts it.
 COPY THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 COPY LICENSE /usr/share/doc/sandbox/LICENSE

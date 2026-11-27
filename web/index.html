@@ -20,7 +20,7 @@
 		<span id="run" title="Execute the program. (Ctrl-Enter) Click again to cancel." data-hotkey="R">
 			<svg xmlns="http://www.w3.org/2000/svg" width="29" height="32" viewBox="0 0 224 247">
 				<path id="run-d" d="M0 0L90.9989 0.0251617C107.5 0 124.322 1.83359 140.012 7.49824C170.926 18.0164 197.448 41.034 211.767 70.4078C225.488 98.0927 227.777 131.163 218.075 160.497C208.787 189.073 188.372 213.686 162.382 228.686C144.27 239.35 123.457 244.882 102.537 246.025H0V208C0 208 66.5525 208.434 99.822 208.234C122.578 207.902 145.082 198.554 161.211 182.491C175.876 168.13 185.152 148.303 186.216 127.759C187.427 107.906 180.907 87.8139 168.597 72.2029C152.375 51.2597 126.318 38.4809 99.8486 38.1751C79.2082 38.1618 58.6404 38 38 38V67H0V0Z"/>
-				<path id="run-morph" style="display: none"/>
+				<path id="run-morph"/>
 				<path id="run-play" d="M 62 75 L 145 123 L 62 171 Z"/>
 			</svg>
 		</span>
@@ -124,7 +124,7 @@
 			<h3><label for="toggle-arguments"><span>Arguments</span></label></h3>
 			<div id="cla-wrapper" class="array-wrapper">
 				<div class="array">
-					<span class="array-add array-tail" onclick="addField(this)">
+					<span class="array-add array-tail">
 						<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
 							<rect width="3" height="9" x="3"/>
 							<rect width="9" height="3" y="3"/>
@@ -150,14 +150,14 @@
 	<div class="main-body"><textarea id="dummy" readonly></textarea></div>
 	<div id="templates">
 		<div class="array">
-			<span class="array-add" onclick="addField(this)">
+			<span class="array-add">
 				<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
 					<rect width="3" height="9" x="3"/>
 					<rect width="9" height="3" y="3"/>
 				</svg>
 				<span>add</span>
 			</span>
-			<span class="array-remove right" onclick="this.parentNode.parentNode.removeChild(this.parentNode)">
+			<span class="array-remove right">
 				<span>remove</span>
 				<svg class="bullet" xmlns="http://www.w3.org/2000/svg" width="9" height="9">
 					<rect width="9" height="3" y="3"/>
@@ -176,6 +176,6 @@
 			<rect width="18" height="6" x="-0.5" y="14.5" class="inset"/>
 			<path d="M 16 13 v 9 l 8 -4.5 z"/>
 		</svg>
-		<div class="message" onclick="this.parentNode.removeChild(this)"><h4>placeholder</h4><div></div></div>
+		<div class="message"><h4>placeholder</h4><div></div></div>
 	</div>
 </html>

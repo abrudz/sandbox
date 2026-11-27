@@ -505,3 +505,46 @@ func TestSandboxCpusSetsTheCPULimit(t *testing.T) {
 		t.Errorf("CPU time %d ms in %d ms wall-clock time: the busy loop did not run", cpu, wall)
 	}
 }
+
+func TestARunWritesAndReadsAFileByARelativeName(t *testing.T) {
+	// The working directory is /home/run, a tmpfs of the run's own.
+	r := run(t, "_←(⊂'hello')⎕NPUT'note.txt'\n⎕←⊃⎕NGET'note.txt'\n", "")
+
+	assertRunLines(t, r, "hello")
+}
+
+func TestARunSeesTheJailsOwnNetworkFilesNotTheContainers(t *testing.T) {
+	// Docker writes the container's resolvers, address and name into its
+	// /etc/resolv.conf, /etc/hosts and /etc/hostname at run time.
+	r := run(t, `{⎕←⍵}¨⎕SH'test -e /etc/resolv.conf && echo "resolv.conf present"; sed "s/^/hosts: /" /etc/hosts; sed "s/^/hostname: /" /etc/hostname; true'`+"\n", "")
+
+	var hostnames []string
+	for _, line := range lines(r.Stdout) {
+		switch {
+		case line == "resolv.conf present":
+			t.Error("the run can read /etc/resolv.conf")
+		case strings.HasPrefix(line, "hosts: "):
+			f := strings.Fields(strings.TrimPrefix(line, "hosts: "))
+			if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+				continue
+			}
+			for _, name := range f[1:] {
+				if name != "localhost" {
+					t.Errorf("/etc/hosts names %s: %q", name, line)
+				}
+			}
+		case strings.HasPrefix(line, "hostname: "):
+			hostnames = append(hostnames, strings.TrimPrefix(line, "hostname: "))
+		}
+	}
+	if !slices.Equal(hostnames, []string{"sandbox"}) {
+		t.Errorf("/etc/hostname reads %q, want sandbox; %s", hostnames, describe(r))
+	}
+}
+
+func TestShellProgramsFoundThroughAlternativesStillRun(t *testing.T) {
+	// Debian links awk to mawk through /etc/alternatives.
+	r := run(t, `{⎕←⍵}¨⎕SH'echo 1 2 | awk "{ print \$2 }"'`+"\n", "")
+
+	assertRunLines(t, r, "2")
+}
