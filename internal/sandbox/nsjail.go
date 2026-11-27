@@ -35,7 +35,13 @@ type Nsjail struct {
 	Workspace int64
 	// DotNetHeap is the .NET garbage collector's heap limit in bytes.
 	DotNetHeap int64
-	// Logf receives nsjail's log when nsjail cannot run a job.
+	// CgroupRoot is the cgroup v2 directory in which each run gets a cgroup
+	// of its own, with the cpu, memory and pids controllers delegated;
+	// nsjail creates the run's limited cgroup inside it. Empty leaves
+	// nsjail's own default, with no cleanup by Run.
+	CgroupRoot string
+	// Logf receives nsjail's log when nsjail cannot run a job, and reports
+	// of a run's cgroup that outlives nsjail or cannot be removed.
 	Logf func(format string, args ...any)
 }
 
@@ -75,6 +81,16 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 	if err := os.WriteFile(filepath.Join(dir, "code"), job.Code, 0o644); err != nil {
 		return Result{}, fmt.Errorf("writing job code: %w", err)
 	}
+	var cgroup []string
+	if n.CgroupRoot != "" {
+		path := filepath.Join(n.CgroupRoot, filepath.Base(dir))
+		if err := createRunCgroup(path); err != nil {
+			return Result{}, err
+		}
+		// Deferred after the job directory's removal, so it runs before it.
+		defer n.removeRunCgroup(path)
+		cgroup = []string{"--cgroupv2_mount", path}
+	}
 
 	logR, logW, err := os.Pipe()
 	if err != nil {
@@ -101,9 +117,9 @@ func (n *Nsjail) Run(ctx context.Context, job Job) (Result, error) {
 		"--env", fmt.Sprintf("MAXWS=%dK", n.Workspace/1024),
 		// The runtime reads its numeric settings as hexadecimal.
 		"--env", fmt.Sprintf("DOTNET_GCHeapHardLimit=0x%x", n.DotNetHeap),
-		"--", n.Command,
 	}
-	cmd := exec.CommandContext(runCtx, n.Binary, append(args, job.Args...)...)
+	args = append(append(append(args, cgroup...), "--", n.Command), job.Args...)
+	cmd := exec.CommandContext(runCtx, n.Binary, args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = stopGrace
 	cmd.Stdin = bytes.NewReader(job.Input)
