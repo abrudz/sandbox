@@ -660,9 +660,10 @@ test("the favicon stays the logo while a run is in progress", async ({ page }) =
 
 // firstFormatLink returns a permalink in TIO's first format,
 // language#name=base64&…, for fields given as [name, value] pairs, with
-// args as one field of base64 arguments joined by "+".
+// args as one field of base64 arguments joined by "+". TIO's base64 has no
+// padding and "@" for "+", since "=" and "+" separate the fields.
 function firstFormatLink(fields) {
-  const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
+  const b64 = (text) => Buffer.from(text, "utf8").toString("base64").replace(/\+/g, "@").replace(/=+$/, "");
   return "/#apl-dyalog#" + fields.map(([name, value]) =>
     name + "=" + (Array.isArray(value) ? value.map(b64).join("+") : b64(value))).join("&");
 }
