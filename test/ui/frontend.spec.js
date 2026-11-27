@@ -657,3 +657,34 @@ test("the favicon stays the logo while a run is in progress", async ({ page }) =
   seen.push(await favicon(page));
   expect(seen).toEqual([idle, idle, idle, idle]);
 });
+
+// firstFormatLink returns a permalink in TIO's first format,
+// language#name=base64&…, for fields given as [name, value] pairs, with
+// args as one field of base64 arguments joined by "+".
+function firstFormatLink(fields) {
+  const b64 = (text) => Buffer.from(text, "utf8").toString("base64");
+  return "/#apl-dyalog#" + fields.map(([name, value]) =>
+    name + "=" + (Array.isArray(value) ? value.map(b64).join("+") : b64(value))).join("&");
+}
+
+test("a first-format permalink opens its header, code, footer, input and arguments", async ({ page }) => {
+  await page.goto(firstFormatLink([
+    ["header", "h←1"], ["code", "⎕←h"], ["footer", "⍝ end"], ["input", "line"], ["args", ["first", "second"]],
+  ]));
+
+  await expect(page.locator("#header")).toHaveValue("h←1");
+  await expect(page.locator("#code")).toHaveValue("⎕←h");
+  await expect(page.locator("#footer")).toHaveValue("⍝ end");
+  await expect(page.locator("#input")).toHaveValue("line");
+  await expect(page.locator("#cla-wrapper textarea")).toHaveCount(2);
+  await expect(page.locator("#cla-wrapper textarea").first()).toHaveValue("first");
+});
+
+test("a first-format permalink cannot set Output or any other element", async ({ page }) => {
+  // Without code the permalink does not run, so Output keeps what it was given.
+  await page.goto(firstFormatLink([["input", "line"], ["output", "forged"], ["lang-example", "forged"]]));
+
+  await expect(page.locator("#input")).toHaveValue("line");
+  await expect(page.locator("#output")).not.toHaveValue("forged");
+  expect(await page.locator("#lang-example").evaluate((element) => element.value)).toBeUndefined();
+});
